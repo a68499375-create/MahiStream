@@ -30,6 +30,11 @@
     "react-player": "^3.4.0",
     "react-router-dom": "^7.17.0"
   },
+  "overrides": {
+    "@codetrix-studio/capacitor-google-auth": {
+      "@capacitor/core": "^8.4.0"
+    }
+  },
   "devDependencies": {
     "@capacitor/cli": "^8.4.0",
     "@eslint/js": "^10.0.1",
