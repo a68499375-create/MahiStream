@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Soft cream radial backing (within safe zone, 72x72 logo region) -->
+    <path android:pathData="M54,58 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="58"
+                android:gradientRadius="34"
+                android:startColor="#33FFF4DD"
+                android:endColor="#00FDF8F1"/>
+        </aapt:attr>
+    </path>
+
+    <!-- Halo ring (angel motif) above the M -->
+    <path android:pathData="M54,30 m-20,0 a20,7 0 1,0 40,0 a20,7 0 1,0 -40,0 Z"
+        android:strokeWidth="2"
+        android:fillColor="#00000000">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="34"
+                android:startY="30"
+                android:endX="74"
+                android:endY="30">
+                <item android:offset="0.0" android:color="#FFE3B577"/>
+                <item android:offset="0.5" android:color="#FFFFF4DD"/>
+                <item android:offset="1.0" android:color="#FFC68A4E"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Halo inner shadow -->
+    <path android:pathData="M54,30 m-18,0 a18,5 0 1,0 36,0 a18,5 0 1,0 -36,0 Z"
+        android:strokeColor="#33A4682F"
+        android:strokeWidth="0.6"
+        android:fillColor="#00000000"/>
+
+    <!-- M shadow (slight offset for depth) -->
+    <path android:pathData="M30,90 L30,48 C30,43 33,40 38,40 C42,40 45,42 47,46 L54,62 L61,46 C63,42 66,40 70,40 C75,40 78,43 78,48 L78,90 L70,90 L70,56 L60,76 C58,79 56,80 54,80 C52,80 50,79 48,76 L38,56 L38,90 Z"
+        android:fillColor="#33000000"/>
+
+    <!-- M main body with caramel gradient -->
+    <path android:pathData="M28,88 L28,46 C28,41 31,38 36,38 C40,38 43,40 45,44 L52,60 L59,44 C61,40 64,38 68,38 C73,38 76,41 76,46 L76,88 L68,88 L68,54 L58,74 C56,77 54,78 52,78 C50,78 48,77 46,74 L36,54 L36,88 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="28"
+                android:startY="38"
+                android:endX="76"
+                android:endY="88">
+                <item android:offset="0.0" android:color="#FFE3B577"/>
+                <item android:offset="0.45" android:color="#FFC68A4E"/>
+                <item android:offset="1.0" android:color="#FFA4682F"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- M left-leg highlight -->
+    <path android:pathData="M30,46 C30,42 33,40 36,40 C39,40 41,41 43,44 L45,48 L41,52 L37,46 L37,68 L33,68 L33,48 Z"
+        android:fillColor="#66FFF4DD"/>
+
+    <!-- M center valley sparkle -->
+    <path android:pathData="M52,62 L54,66 L52,70 L50,66 Z"
+        android:fillColor="#88FFF4DD"/>
+
+    <!-- Tiny halo dot accents -->
+    <path android:pathData="M34,30 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0 Z"
+        android:fillColor="#FFFFF4DD"/>
+    <path android:pathData="M74,30 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0 Z"
+        android:fillColor="#FFFFF4DD"/>
+
+</vector>

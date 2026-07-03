@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Background: warm caramel radial gradient -->
+    <path android:pathData="M0,0 L320,0 L320,180 L0,180 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="0"
+                android:endX="320"
+                android:endY="180">
+                <item android:offset="0.0" android:color="#FDF8F1"/>
+                <item android:offset="0.35" android:color="#E3B577"/>
+                <item android:offset="0.75" android:color="#C68A4E"/>
+                <item android:offset="1.0" android:color="#A4682F"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Soft cream glow behind logo -->
+    <path android:pathData="M70,90 m-58,0 a58,58 0 1,0 116,0 a58,58 0 1,0 -116,0 Z"
+        android:fillColor="#33FDF8F1"/>
+    <path android:pathData="M70,90 m-44,0 a44,44 0 1,0 88,0 a44,44 0 1,0 -88,0 Z"
+        android:fillColor="#22FDF8F1"/>
+
+    <!-- Halo ring above M (angel motif) -->
+    <path android:pathData="M70,42 m-32,0 a32,12 0 1,0 64,0 a32,12 0 1,0 -64,0 Z"
+        android:strokeColor="#FDF8F1"
+        android:strokeWidth="2.4"
+        android:fillColor="#00000000"/>
+    <path android:pathData="M70,42 m-32,0 a32,12 0 1,0 64,0 a32,12 0 1,0 -64,0 Z"
+        android:strokeColor="#66A4682F"
+        android:strokeWidth="0.8"
+        android:fillColor="#00000000"/>
+
+    <!-- Stylized 'M' for MahiStream logo (bold with curved bowls) -->
+    <group>
+        <!-- M shadow -->
+        <path android:pathData="M34,138 L34,68 C34,62 38,58 44,58 C49,58 52,60 55,65 L70,93 L85,65 C88,60 91,58 96,58 C102,58 106,62 106,68 L106,138 L94,138 L94,82 L76,114 C74,118 72,119 70,119 C68,119 66,118 64,114 L46,82 L46,138 Z"
+            android:fillColor="#33000000"/>
+        <!-- M main with gradient -->
+        <path android:pathData="M32,136 L32,66 C32,60 36,56 42,56 C47,56 50,58 53,63 L68,91 L83,63 C86,58 89,56 94,56 C100,56 104,60 104,66 L104,136 L92,136 L92,80 L74,112 C72,116 70,117 68,117 C66,117 64,116 62,112 L44,80 L44,136 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="32"
+                    android:startY="56"
+                    android:endX="104"
+                    android:endY="136">
+                    <item android:offset="0.0" android:color="#FFF4DD"/>
+                    <item android:offset="0.5" android:color="#FDF8F1"/>
+                    <item android:offset="1.0" android:color="#E3B577"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- M highlight -->
+        <path android:pathData="M36,66 C36,62 39,60 42,60 C45,60 47,61 49,64 L52,69 L48,72 L44,66 L44,80 L40,80 L40,68 Z"
+            android:fillColor="#88FFFFFF"/>
+    </group>
+
+    <!-- Wordmark "MahiStream" -->
+    <group>
+        <!-- Soft shadow line -->
+        <path android:pathData="M138,76 L290,76"
+            android:strokeColor="#33000000"
+            android:strokeWidth="0.6"/>
+
+        <!-- "MahiStream" — composed of stylized letterforms -->
+        <!-- M -->
+        <path android:pathData="M138,98 L138,58 L144,58 L154,82 L164,58 L170,58 L170,98 L165,98 L165,68 L156,90 L152,90 L143,68 L143,98 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- a -->
+        <path android:pathData="M176,98 C173,98 171,96 171,92 C171,87 174,85 180,84 L184,84 L184,82 C184,79 182,77 179,77 C176,77 174,78 173,80 L172,77 C174,75 176,74 180,74 C185,74 189,76 189,82 L189,98 L184,98 L184,95 C182,97 179,98 176,98 Z M178,94 C181,94 184,92 184,89 L184,87 L181,87 C177,87 175,89 175,91 C175,93 176,94 178,94 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- h -->
+        <path android:pathData="M194,98 L194,56 L199,56 L199,77 C201,75 203,74 206,74 C211,74 214,77 214,82 L214,98 L209,98 L209,83 C209,80 207,78 204,78 C201,78 199,80 199,83 L199,98 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- i -->
+        <path android:pathData="M220,98 L220,75 L225,75 L225,98 Z M220,68 L220,62 L225,62 L225,68 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- divider dot -->
+        <path android:pathData="M232,86 m-1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- S -->
+        <path android:pathData="M240,94 C242,96 245,97 248,97 C252,97 254,95 254,92 C254,89 252,88 248,87 L246,86 C242,85 239,83 239,79 C239,75 242,72 247,72 C250,72 253,73 255,75 L253,78 C251,76 249,75 247,75 C244,75 243,77 243,79 C243,81 244,82 247,83 L249,84 C254,85 258,87 258,92 C258,96 254,100 248,100 C244,100 241,99 238,97 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- t -->
+        <path android:pathData="M263,98 L263,78 L260,78 L260,75 L263,75 L263,68 L268,68 L268,75 L273,75 L273,78 L268,78 L268,93 C268,95 269,95 271,95 C272,95 273,95 273,95 L273,98 C272,98 271,98 270,98 C266,98 263,97 263,93 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- r -->
+        <path android:pathData="M277,98 L277,75 L282,75 L282,79 C283,76 285,74 288,74 C289,74 290,74 290,75 L290,79 C289,79 288,79 287,79 C284,79 282,81 282,84 L282,98 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- e -->
+        <path android:pathData="M295,87 C295,80 299,74 305,74 C311,74 314,79 314,86 L314,87 L300,87 C300,92 302,95 306,95 C309,95 311,93 312,91 L313,94 C311,97 308,99 305,99 C299,99 295,94 295,87 Z M300,84 L310,84 C310,80 308,77 305,77 C302,77 300,80 300,84 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- a -->
+        <path android:pathData="M319,98 C316,98 314,96 314,92 C314,87 317,85 323,84 L327,84 L327,82 C327,79 325,77 322,77 C319,77 317,78 316,80 L315,77 C317,75 319,74 323,74 C328,74 332,76 332,82 L332,98 L327,98 L327,95 C325,97 322,98 319,98 Z"
+            android:fillColor="#FDF8F1"/>
+        <!-- m -->
+        <path android:pathData="M260,138 L260,115 L264,115 L264,118 C266,116 268,114 271,114 C274,114 276,115 277,118 C279,116 282,114 285,114 C290,114 293,117 293,122 L293,138 L288,138 L288,123 C288,120 287,118 284,118 C281,118 279,120 279,123 L279,138 L274,138 L274,123 C274,120 273,118 270,118 C267,118 265,120 265,123 L265,138 Z"
+            android:fillColor="#00000000"/>
+    </group>
+
+    <!-- Tagline strip -->
+    <path android:pathData="M138,108 L300,108"
+        android:strokeColor="#88FDF8F1"
+        android:strokeWidth="0.8"/>
+
+    <path android:pathData="M138,124 L138,116 L143,116 L146,123 L149,116 L154,116 L154,124 L151,124 L151,119 L148,124 L145,124 L142,119 L142,124 Z M158,124 L158,116 L162,116 L162,124 Z M167,124 L167,118 L165,118 L165,116 L172,116 L172,118 L170,118 L170,124 Z M175,124 L175,116 L181,116 L181,118 L178,118 L178,119 L181,119 L181,121 L178,121 L178,122 L181,122 L181,124 Z"
+        android:fillColor="#FDF8F1"/>
+
+    <!-- Subtle bottom shadow -->
+    <path android:pathData="M0,160 L320,160 L320,180 L0,180 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0"
+                android:startY="160"
+                android:endX="0"
+                android:endY="180">
+                <item android:offset="0.0" android:color="#00000000"/>
+                <item android:offset="1.0" android:color="#33000000"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+</vector>

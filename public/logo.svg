@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Background gradient circle (symmetric base) -->
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c68a4e"/>
+      <stop offset="100%" stop-color="#8b5a2b"/>
+    </linearGradient>
+    <linearGradient id="mGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f7e9d6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#ffd9a8" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffd9a8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Rounded square frame (perfectly symmetric) -->
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Soft inner glow (symmetric) -->
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="url(#glow)"/>
+
+  <!-- Decorative outer ring -->
+  <rect x="56" y="56" width="400" height="400" rx="96" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="2"/>
+
+  <!-- Mahiru "M" — built from two symmetric triangular peaks + central V -->
+  <!-- Centerline at x=256; mirrored geometry -->
+  <g transform="translate(256 256)">
+    <!-- Left peak -->
+    <path d="M -110 100 L -110 -100 L -55 -50 L 0 -100 L 0 100 L -55 -10 Z" fill="url(#mGrad)"/>
+    <!-- Right peak (mirror of left) -->
+    <path d="M 110 100 L 110 -100 L 55 -50 L 0 -100 L 0 100 L 55 -10 Z" fill="url(#mGrad)"/>
+    <!-- Center accent diamond -->
+    <path d="M 0 -100 L 14 -78 L 0 -56 L -14 -78 Z" fill="#fff3df"/>
+  </g>
+
+  <!-- Symmetric corner accents -->
+  <circle cx="96" cy="96" r="6" fill="#ffffff" fill-opacity="0.35"/>
+  <circle cx="416" cy="96" r="6" fill="#ffffff" fill-opacity="0.35"/>
+  <circle cx="96" cy="416" r="6" fill="#ffffff" fill-opacity="0.35"/>
+  <circle cx="416" cy="416" r="6" fill="#ffffff" fill-opacity="0.35"/>
+</svg>

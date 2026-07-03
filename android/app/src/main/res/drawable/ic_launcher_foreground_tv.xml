@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Cream backing -->
+    <path android:pathData="M54,54 m-32,0 a32,32 0 1,0 64,0 a32,32 0 1,0 -64,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="54"
+                android:gradientRadius="36"
+                android:startColor="#33FFF4DD"
+                android:endColor="#00FDF8F1"/>
+        </aapt:attr>
+    </path>
+
+    <!-- Halo ring (wider for TV) -->
+    <path android:pathData="M54,28 m-22,0 a22,7 0 1,0 44,0 a22,7 0 1,0 -44,0 Z"
+        android:strokeWidth="2.2"
+        android:fillColor="#00000000">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="32"
+                android:startY="28"
+                android:endX="76"
+                android:endY="28">
+                <item android:offset="0.0" android:color="#FFE3B577"/>
+                <item android:offset="0.5" android:color="#FFFFF4DD"/>
+                <item android:offset="1.0" android:color="#FFC68A4E"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- TV remote glyph (left of M) - small rounded rect with buttons -->
+    <path android:pathData="M16,52 L24,52 C25,52 26,53 26,54 L26,72 C26,73 25,74 24,74 L16,74 C15,74 14,73 14,72 L14,54 C14,53 15,52 16,52 Z"
+        android:fillColor="#FFC68A4E"/>
+    <path android:pathData="M17,55 L23,55 L23,60 L17,60 Z"
+        android:fillColor="#FFFDF8F1"/>
+    <path android:pathData="M20,64 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0 Z"
+        android:fillColor="#FFFDF8F1"/>
+    <path android:pathData="M20,69 m-1,0 a1,1 0 1,0 2,0 a1,1 0 1,0 -2,0 Z"
+        android:fillColor="#FFFDF8F1"/>
+
+    <!-- M shadow -->
+    <path android:pathData="M32,82 L32,46 C32,42 35,40 38,40 C41,40 43,41 45,44 L52,58 L59,44 C61,41 63,40 66,40 C69,40 72,42 72,46 L72,82 L65,82 L65,52 L57,68 C56,70 54,71 52,71 C50,71 48,70 47,68 L39,52 L39,82 Z"
+        android:fillColor="#33000000"/>
+
+    <!-- M main (compact, leaving room for remote + TV label) -->
+    <path android:pathData="M30,80 L30,44 C30,40 33,38 36,38 C39,38 41,39 43,42 L50,56 L57,42 C59,39 61,38 64,38 C67,38 70,40 70,44 L70,80 L63,80 L63,50 L55,66 C54,68 52,69 50,69 C48,69 46,68 45,66 L37,50 L37,80 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="30"
+                android:startY="38"
+                android:endX="70"
+                android:endY="80">
+                <item android:offset="0.0" android:color="#FFE3B577"/>
+                <item android:offset="0.45" android:color="#FFC68A4E"/>
+                <item android:offset="1.0" android:color="#FFA4682F"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- M highlight -->
+    <path android:pathData="M32,44 C32,41 34,39 36,39 C38,39 40,40 41,42 L43,46 L40,49 L36,44 L36,62 L33,62 L33,46 Z"
+        android:fillColor="#66FFF4DD"/>
+
+    <!-- "TV" sub-text bottom right -->
+    <path android:pathData="M76,80 L76,68 L94,68 C95,68 96,69 96,70 L96,80 C96,81 95,82 94,82 L78,82 C77,82 76,81 76,80 Z"
+        android:fillColor="#FFA4682F"/>
+    <!-- T -->
+    <path android:pathData="M79,72 L86,72 L86,73.5 L83.2,73.5 L83.2,79 L81.8,79 L81.8,73.5 L79,73.5 Z"
+        android:fillColor="#FFFDF8F1"/>
+    <!-- V -->
+    <path android:pathData="M87,72 L88.5,72 L90.5,77.2 L92.5,72 L94,72 L91.2,79 L89.8,79 Z"
+        android:fillColor="#FFFDF8F1"/>
+
+    <!-- Halo accent dots -->
+    <path android:pathData="M32,28 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0 Z"
+        android:fillColor="#FFFFF4DD"/>
+    <path android:pathData="M76,28 m-1.1,0 a1.1,1.1 0 1,0 2.2,0 a1.1,1.1 0 1,0 -2.2,0 Z"
+        android:fillColor="#FFFFF4DD"/>
+
+</vector>

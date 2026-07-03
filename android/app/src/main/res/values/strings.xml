@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="title_activity_main">MahiStream</string>
+    <string name="package_name">com.mahistream.hd</string>
+    <string name="custom_url_scheme">com.mahistream.hd</string>
+    <string name="server_client_id">632438660940-jn6rbaa8dulcq6o5sol7p236toffha43.apps.googleusercontent.com</string>
+</resources>

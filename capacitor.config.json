@@ -1,0 +1,32 @@
+{
+  "appId": "com.mahistream.hd",
+  "appName": "mahistream",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "androidScheme": "http"
+  },
+  "android": {
+    "webContentsDebuggingEnabled": false,
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 200,
+      "launchAutoHide": true,
+      "backgroundColor": "#FFE5B4",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true,
+      "launchFadeOutDuration": 100
+    },
+    "GoogleAuth": {
+      "scopes": ["profile", "email"],
+      "serverClientId": "632438660940-tcvha04g67vg492qlr8f1jiufg6vmj5k.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
+    }
+  }
+}
+

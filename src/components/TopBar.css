@@ -1,0 +1,102 @@
+/* TopBar - NanimeID style */
+.top-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  height: 64px;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.top-bar-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  padding: 4px 0;
+}
+
+.logo-mark {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, #FF66CD, #EC4899);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 20px;
+  font-weight: 900;
+  color: #FFFFFF;
+  box-shadow: 0 0 20px rgba(255, 102, 205, 0.4);
+}
+
+.logo-text {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.5px;
+  color: #FFFFFF;
+}
+
+.logo-main {
+  color: #FFFFFF;
+}
+
+.logo-accent {
+  color: #FF66CD;
+}
+
+.search-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  transition: all 0.2s ease;
+}
+
+.search-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 102, 205, 0.5);
+  color: #FFFFFF;
+}
+
+.search-btn:focus-visible {
+  outline: 2px solid #FF66CD;
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .top-bar-inner {
+    padding: 0 16px;
+  }
+  
+  .logo-text {
+    font-size: 24px;
+  }
+  
+  .search-btn {
+    width: 40px;
+    height: 40px;
+  }
+}

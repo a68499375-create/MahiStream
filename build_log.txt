@@ -1,0 +1,254 @@
+Starting a Gradle Daemon, 1 busy and 1 incompatible and 9 stopped Daemons could not be reused, use --status for details
+
+> Configure project :app
+WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
+
+> Configure project :capacitor-cordova-android-plugins
+WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-android:preBuild UP-TO-DATE
+> Task :capacitor-android:preDebugBuild UP-TO-DATE
+> Task :capacitor-android:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:preBuild UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:preDebugBuild UP-TO-DATE
+> Task :capacitor-screen-orientation:preBuild UP-TO-DATE
+> Task :capacitor-screen-orientation:preDebugBuild UP-TO-DATE
+> Task :capacitor-screen-orientation:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-splash-screen:preBuild UP-TO-DATE
+> Task :capacitor-splash-screen:preDebugBuild UP-TO-DATE
+> Task :capacitor-splash-screen:writeDebugAarMetadata UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:preBuild UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:preDebugBuild UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:writeDebugAarMetadata
+> Task :capacitor-android:processDebugNavigationResources UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:processDebugNavigationResources
+> Task :capacitor-screen-orientation:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-splash-screen:processDebugNavigationResources UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :capacitor-android:generateDebugResValues UP-TO-DATE
+> Task :capacitor-android:generateDebugResources UP-TO-DATE
+> Task :capacitor-android:packageDebugResources UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:generateDebugResValues
+> Task :capacitor-cordova-android-plugins:generateDebugResources
+> Task :capacitor-cordova-android-plugins:packageDebugResources
+> Task :capacitor-screen-orientation:generateDebugResValues UP-TO-DATE
+> Task :capacitor-screen-orientation:generateDebugResources UP-TO-DATE
+> Task :capacitor-screen-orientation:packageDebugResources UP-TO-DATE
+> Task :capacitor-splash-screen:generateDebugResValues UP-TO-DATE
+> Task :capacitor-splash-screen:generateDebugResources UP-TO-DATE
+> Task :capacitor-splash-screen:packageDebugResources UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:generateDebugResValues UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:generateDebugResources UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:packageDebugResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-android:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-android:processDebugManifest UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:extractDeepLinksDebug
+> Task :capacitor-screen-orientation:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-screen-orientation:processDebugManifest UP-TO-DATE
+> Task :capacitor-splash-screen:extractDeepLinksDebug UP-TO-DATE
+> Task :capacitor-splash-screen:processDebugManifest UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:extractDeepLinksDebug UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:processDebugManifest UP-TO-DATE
+> Task :capacitor-android:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-android:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-android:generateDebugRFile UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:compileDebugLibraryResources
+> Task :capacitor-screen-orientation:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-screen-orientation:parseDebugLocalResources UP-TO-DATE
+> Task :capacitor-screen-orientation:generateDebugRFile UP-TO-DATE
+> Task :capacitor-splash-screen:compileDebugLibraryResources UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:processDebugManifest
+> Task :capacitor-splash-screen:parseDebugLocalResources UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:parseDebugLocalResources
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :capacitor-splash-screen:generateDebugRFile UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:compileDebugLibraryResources UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:parseDebugLocalResources UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:generateDebugRFile UP-TO-DATE
+> Task :capacitor-android:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:generateDebugRFile
+> Task :capacitor-android:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :capacitor-android:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :capacitor-screen-orientation:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:javaPreCompileDebug
+> Task :capacitor-screen-orientation:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:compileDebugJavaWithJavac NO-SOURCE
+> Task :capacitor-screen-orientation:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :capacitor-splash-screen:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:bundleLibCompileToJarDebug
+> Task :capacitor-splash-screen:compileDebugJavaWithJavac UP-TO-DATE
+> Task :capacitor-splash-screen:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:javaPreCompileDebug UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:compileDebugJavaWithJavac UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :capacitor-android:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-android:compileDebugShaders NO-SOURCE
+> Task :capacitor-android:generateDebugAssets UP-TO-DATE
+> Task :capacitor-android:mergeDebugAssets UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugShaders
+> Task :capacitor-cordova-android-plugins:compileDebugShaders NO-SOURCE
+> Task :capacitor-cordova-android-plugins:generateDebugAssets UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugAssets
+> Task :capacitor-screen-orientation:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-screen-orientation:compileDebugShaders NO-SOURCE
+> Task :capacitor-screen-orientation:generateDebugAssets UP-TO-DATE
+> Task :capacitor-screen-orientation:mergeDebugAssets UP-TO-DATE
+> Task :capacitor-splash-screen:mergeDebugShaders UP-TO-DATE
+> Task :capacitor-splash-screen:compileDebugShaders NO-SOURCE
+> Task :capacitor-splash-screen:generateDebugAssets UP-TO-DATE
+> Task :capacitor-splash-screen:mergeDebugAssets UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:mergeDebugShaders UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:compileDebugShaders NO-SOURCE
+> Task :codetrix-studio-capacitor-google-auth:generateDebugAssets UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :capacitor-screen-orientation:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-splash-screen:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-android:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:bundleLibRuntimeToJarDebug
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:dexBuilderDebug UP-TO-DATE
+> Task :app:processDebugJavaRes NO-SOURCE
+> Task :capacitor-android:processDebugJavaRes NO-SOURCE
+> Task :capacitor-cordova-android-plugins:processDebugJavaRes NO-SOURCE
+> Task :capacitor-screen-orientation:processDebugJavaRes NO-SOURCE
+> Task :capacitor-splash-screen:processDebugJavaRes NO-SOURCE
+> Task :codetrix-studio-capacitor-google-auth:processDebugJavaRes NO-SOURCE
+> Task :app:compressDebugAssets
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :capacitor-screen-orientation:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-splash-screen:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-android:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:bundleLibRuntimeToDirDebug
+> Task :app:mergeProjectDexDebug UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-android:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-android:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-android:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugJniLibFolders
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-screen-orientation:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-screen-orientation:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-cordova-android-plugins:copyDebugJniLibsProjectOnly
+> Task :capacitor-screen-orientation:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :capacitor-splash-screen:mergeDebugJniLibFolders UP-TO-DATE
+> Task :capacitor-splash-screen:mergeDebugNativeLibs NO-SOURCE
+> Task :capacitor-splash-screen:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:mergeDebugJniLibFolders UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:mergeDebugNativeLibs NO-SOURCE
+> Task :codetrix-studio-capacitor-google-auth:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :capacitor-android:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-android:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-android:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-android:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-android:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-android:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-android:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-android:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-android:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-android:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-android:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-android:bundleDebugAar UP-TO-DATE
+> Task :capacitor-android:assembleDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-cordova-android-plugins:copyDebugJniLibsProjectAndLocalJars
+> Task :capacitor-cordova-android-plugins:checkDebugAarMetadata
+> Task :capacitor-cordova-android-plugins:extractDebugAnnotations
+> Task :capacitor-cordova-android-plugins:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-screen-orientation:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-screen-orientation:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-screen-orientation:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-screen-orientation:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-screen-orientation:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-screen-orientation:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-screen-orientation:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-screen-orientation:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-screen-orientation:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-screen-orientation:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-screen-orientation:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-screen-orientation:bundleDebugAar UP-TO-DATE
+> Task :capacitor-screen-orientation:assembleDebug UP-TO-DATE
+> Task :capacitor-splash-screen:checkDebugAarMetadata UP-TO-DATE
+> Task :capacitor-splash-screen:stripDebugDebugSymbols NO-SOURCE
+> Task :capacitor-splash-screen:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :capacitor-splash-screen:extractDebugAnnotations UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:mergeDebugJavaResource
+> Task :capacitor-splash-screen:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:syncDebugLibJars
+> Task :capacitor-cordova-android-plugins:bundleDebugAar
+> Task :capacitor-cordova-android-plugins:assembleDebug
+> Task :capacitor-splash-screen:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :capacitor-splash-screen:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :capacitor-splash-screen:prepareDebugArtProfile UP-TO-DATE
+> Task :capacitor-splash-screen:prepareLintJarForPublish UP-TO-DATE
+> Task :capacitor-splash-screen:mergeDebugJavaResource UP-TO-DATE
+> Task :capacitor-splash-screen:syncDebugLibJars UP-TO-DATE
+> Task :capacitor-splash-screen:bundleDebugAar UP-TO-DATE
+> Task :capacitor-splash-screen:assembleDebug UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:checkDebugAarMetadata UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:stripDebugDebugSymbols NO-SOURCE
+> Task :codetrix-studio-capacitor-google-auth:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:extractDebugAnnotations UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:prepareDebugArtProfile UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:prepareLintJarForPublish UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:mergeDebugJavaResource UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:syncDebugLibJars UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:bundleDebugAar UP-TO-DATE
+> Task :codetrix-studio-capacitor-google-auth:assembleDebug UP-TO-DATE
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleDebug
+
+[Incubating] Problems report is available at: file:///C:/Users/lenov/Downloads/MahiStream/mahistream-app/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 34s
+184 actionable tasks: 27 executed, 157 up-to-date
+DONE 

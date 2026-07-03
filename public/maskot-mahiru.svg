@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 640" fill="none">
+  <!-- Mahiru — chibi anime girl maskot (caramel + cream palette).
+       Geometry is mirror-symmetric around x=256. Stylized friendly look. -->
+  <defs>
+    <linearGradient id="hairGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f7e3c5"/>
+      <stop offset="100%" stop-color="#c68a4e"/>
+    </linearGradient>
+    <linearGradient id="dressGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#c68a4e"/>
+      <stop offset="100%" stop-color="#8b5a2b"/>
+    </linearGradient>
+    <radialGradient id="cheekGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffb3a0" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#ffb3a0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bgHalo" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#ffe4c2" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ffe4c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Halo background -->
+  <ellipse cx="256" cy="240" rx="220" ry="200" fill="url(#bgHalo)"/>
+
+  <!-- Hair back (large, framing head) -->
+  <path d="M 100 260
+           Q 100 80 256 80
+           Q 412 80 412 260
+           Q 412 360 380 420
+           L 350 420
+           Q 380 320 360 260
+           Q 360 180 256 180
+           Q 152 180 152 260
+           Q 132 320 162 420
+           L 132 420
+           Q 100 360 100 260 Z"
+        fill="url(#hairGrad)"/>
+
+  <!-- Side hair locks (symmetric) -->
+  <path d="M 130 260 Q 110 360 140 460 L 175 460 Q 165 380 175 260 Z" fill="url(#hairGrad)"/>
+  <path d="M 382 260 Q 402 360 372 460 L 337 460 Q 347 380 337 260 Z" fill="url(#hairGrad)"/>
+
+  <!-- Face (slightly oval, centered) -->
+  <ellipse cx="256" cy="240" rx="106" ry="118" fill="#fff5e3"/>
+
+  <!-- Front hair fringe (symmetric peaks) -->
+  <path d="M 150 220
+           Q 170 130 220 145
+           Q 240 110 256 140
+           Q 272 110 292 145
+           Q 342 130 362 220
+           Q 320 200 292 215
+           Q 270 175 256 195
+           Q 242 175 220 215
+           Q 192 200 150 220 Z"
+        fill="url(#hairGrad)"/>
+
+  <!-- Ahoge (top sprout, symmetric) -->
+  <path d="M 248 90 Q 256 50 264 90 Q 260 78 256 80 Q 252 78 248 90 Z" fill="url(#hairGrad)"/>
+
+  <!-- Cheeks (mirror) -->
+  <circle cx="200" cy="270" r="18" fill="url(#cheekGrad)"/>
+  <circle cx="312" cy="270" r="18" fill="url(#cheekGrad)"/>
+
+  <!-- Eyes — large round chibi eyes (mirror) -->
+  <g>
+    <!-- Left eye -->
+    <ellipse cx="212" cy="245" rx="22" ry="28" fill="#3a2412"/>
+    <ellipse cx="212" cy="240" rx="18" ry="24" fill="#c68a4e"/>
+    <ellipse cx="212" cy="248" rx="10" ry="14" fill="#4a2c14"/>
+    <circle cx="208" cy="236" r="6" fill="#ffffff"/>
+    <circle cx="218" cy="252" r="3" fill="#ffffff"/>
+
+    <!-- Right eye -->
+    <ellipse cx="300" cy="245" rx="22" ry="28" fill="#3a2412"/>
+    <ellipse cx="300" cy="240" rx="18" ry="24" fill="#c68a4e"/>
+    <ellipse cx="300" cy="248" rx="10" ry="14" fill="#4a2c14"/>
+    <circle cx="304" cy="236" r="6" fill="#ffffff"/>
+    <circle cx="294" cy="252" r="3" fill="#ffffff"/>
+  </g>
+
+  <!-- Eyebrows -->
+  <path d="M 192 212 Q 212 204 232 212" stroke="#8b5a2b" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <path d="M 280 212 Q 300 204 320 212" stroke="#8b5a2b" stroke-width="4" stroke-linecap="round" fill="none"/>
+
+  <!-- Nose (subtle) -->
+  <path d="M 256 282 Q 252 290 256 294 Q 260 290 256 282" fill="#e6c098" opacity="0.6"/>
+
+  <!-- Mouth (friendly smile, symmetric) -->
+  <path d="M 240 310 Q 256 326 272 310" stroke="#8b5a2b" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <path d="M 244 313 Q 256 322 268 313 Q 256 318 244 313" fill="#ff9d8b" opacity="0.7"/>
+
+  <!-- Neck -->
+  <rect x="234" y="350" width="44" height="40" rx="14" fill="#fff5e3"/>
+
+  <!-- Dress / body (symmetric trapezoid) -->
+  <path d="M 178 410
+           Q 256 380 334 410
+           L 380 560
+           Q 256 600 132 560
+           Z"
+        fill="url(#dressGrad)"/>
+
+  <!-- Ribbon collar (centered) -->
+  <path d="M 224 388 L 256 396 L 288 388 L 280 408 L 256 402 L 232 408 Z" fill="#ffd9a8"/>
+  <circle cx="256" cy="400" r="6" fill="#8b5a2b"/>
+
+  <!-- Cute heart on dress (centered) -->
+  <path d="M 256 470 C 246 458, 230 458, 230 478 C 230 494, 256 510, 256 510 C 256 510, 282 494, 282 478 C 282 458, 266 458, 256 470 Z"
+        fill="#fff5e3" opacity="0.85"/>
+
+  <!-- Sparkles (decorative, symmetric pairs) -->
+  <g fill="#fff5e3" opacity="0.9">
+    <path d="M 110 160 L 116 170 L 126 174 L 116 178 L 110 188 L 104 178 L 94 174 L 104 170 Z"/>
+    <path d="M 402 160 L 408 170 L 418 174 L 408 178 L 402 188 L 396 178 L 386 174 L 396 170 Z"/>
+    <circle cx="90" cy="320" r="4"/>
+    <circle cx="422" cy="320" r="4"/>
+  </g>
+</svg>

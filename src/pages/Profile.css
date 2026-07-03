@@ -1,0 +1,286 @@
+/* Premium Profile — kartu modular dengan hero gradient kaya, stat tiles
+   glassmorphic, dan grid setting yang dikelompokkan per kategori. */
+
+.profile-layout {
+  min-height: 100vh;
+}
+
+/* Hero gradient dengan tiga layer halo + radial dust supaya tidak datar.
+   Pemilihan warna mengikuti var(--color-primary) jadi tema gelap/terang
+   keduanya tetap konsisten. */
+.profile-hero-bg {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 50% at 15% 0%, color-mix(in srgb, var(--color-primary) 55%, transparent), transparent 70%),
+    radial-gradient(50% 60% at 95% 10%, color-mix(in srgb, var(--color-accent, var(--color-primary)) 40%, transparent), transparent 70%),
+    radial-gradient(80% 70% at 50% 110%, color-mix(in srgb, var(--color-primary-dark) 60%, transparent), transparent 70%),
+    linear-gradient(160deg, var(--color-primary) 0%, var(--color-primary-dark) 55%, #1a1a1f 100%);
+  color: #fff;
+}
+
+/* Grain pattern + diagonal sheen — tambah depth tanpa mengganggu kontras. */
+.profile-hero-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.08) 1px, transparent 0);
+  background-size: 16px 16px;
+  pointer-events: none;
+  opacity: 0.8;
+  mix-blend-mode: overlay;
+}
+
+.profile-hero-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.10) 0%, transparent 40%, transparent 70%, rgba(255,255,255,0.05) 100%);
+  pointer-events: none;
+}
+
+/* Floating orb decorative — efek bokeh ringan di hero. */
+.profile-orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(36px);
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* Cover banner — nanimeid style: image cover di atas penuh-width, fade ke
+   warna background supaya stats/content di bawahnya smooth transition. */
+.profile-cover {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+  background: var(--color-surface-highlight);
+}
+
+.profile-cover-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+    rgba(0,0,0,0.25) 0%,
+    rgba(0,0,0,0.10) 40%,
+    color-mix(in srgb, var(--color-bg) 50%, transparent) 75%,
+    var(--color-bg) 100%);
+  pointer-events: none;
+}
+
+/* Avatar ring berlapis: outer ring gradient + inner ring solid border.
+   Bentuk circular ala nanimeid. */
+.profile-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  padding: 4px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent, var(--color-primary-dark)));
+  box-shadow:
+    0 12px 32px -10px color-mix(in srgb, var(--color-primary) 65%, transparent),
+    0 4px 10px -2px rgba(0,0,0,0.18),
+    0 0 0 4px var(--color-bg);
+}
+
+.profile-avatar-fallback {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-primary) 22%, var(--color-surface)),
+    color-mix(in srgb, var(--color-primary) 38%, var(--color-surface)));
+}
+
+/* Online presence dot di avatar */
+.profile-presence-dot {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #10b981;
+  border: 3px solid var(--color-bg);
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55);
+  animation: profile-pulse 2.2s cubic-bezier(0.66, 0, 0, 1) infinite;
+}
+
+/* Stat pill — 4-col compact pillar ala nanimeid. Hover bouncy. */
+.profile-stat-pill {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 6px 11px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  text-align: center;
+  overflow: hidden;
+  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.profile-stat-pill::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: var(--accent, var(--color-primary));
+  opacity: 0.85;
+}
+
+.profile-stat-pill:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+.profile-stat-pill-icon {
+  margin-bottom: 2px;
+}
+
+.profile-stat-pill-value {
+  font-size: 17px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  line-height: 1;
+}
+
+.profile-stat-pill-label {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-top: 1px;
+}
+
+@keyframes profile-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(16, 185, 129, 0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0   rgba(16, 185, 129, 0); }
+}
+
+/* Stat pill — bukan kotak biasa: glass + accent stripe di kiri. */
+.profile-stat-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+  background: var(--color-surface-highlight);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  overflow: hidden;
+  transition: transform 200ms ease, border-color 200ms ease;
+}
+
+.profile-stat-tile::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent, var(--color-primary));
+  opacity: 0.85;
+}
+
+.profile-stat-tile:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+/* Setting card — hover lift halus + accent glow di iconbox saat hover. */
+.setting-card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  padding: 16px 16px 14px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 22px;
+  text-align: left;
+  overflow: hidden;
+  transition:
+    transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+.setting-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-primary) 6%, transparent) 0%,
+    transparent 40%);
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.setting-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 16px 30px -16px color-mix(in srgb, var(--color-primary) 30%, transparent),
+    0 6px 12px -4px rgba(0,0,0,0.08);
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+}
+
+.setting-card:hover::after {
+  opacity: 1;
+}
+
+.setting-card:active {
+  transform: scale(0.985);
+}
+
+/* Section divider label */
+.profile-section-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 4px 12px 4px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.profile-section-label::before {
+  content: '';
+  width: 5px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--color-primary);
+}
+
+.profile-section-label .count {
+  margin-left: auto;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Legacy hooks supaya file lain yang masih reference tidak break. */
+.bg-off-black { background-color: var(--color-bg); }
+.text-error { color: #ef4444; }
+.border-error { border-color: #ef4444; }
+.history-item, .favorite-item { border-radius: 16px; }
+.setting-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 16px 20px;
+  background: transparent;
+  border: none;
+  transition: var(--transition);
+  cursor: pointer;
+}

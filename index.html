@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="MahiStream - Platform streaming anime terbaik dengan resolusi HD, tanpa iklan pop-up, dan update tercepat." />
+    <title>MahiStream</title>
+    <!-- Preconnect + Preload fonts agar font siap sebelum React render -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Poppins:wght@400;500;600;700&display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Inline critical CSS: spinner + bg agar tidak ada layar putih -->
+    <style>
+      body { margin: 0; background: #fdf8f1; }
+      #root:empty {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 100vh; min-height: 100dvh;
+      }
+      #root:empty::after {
+        content: ''; width: 36px; height: 36px;
+        border: 4px solid #c68a4e; border-top-color: transparent;
+        border-radius: 50%;
+        animation: _spin .6s linear infinite;
+      }
+      @keyframes _spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
