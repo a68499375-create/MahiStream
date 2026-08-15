@@ -1,567 +1,348 @@
-import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { api, uid, fmtDate } from '../lib/client';
+import { getProfile, setProfile } from '../lib/prefs';
+import { AnimeCard, EmptyState, Spinner, cx, Poster } from '../components/ui/index';
+import Shell from '../components/Shell';
+import { useToast } from '../components/Toast';
 import {
-  LogIn, Edit3, Camera, Settings as SettingsIcon, Mail, User, X, Bell, Heart, Clock, ImagePlus, Save,
-  AlertCircle, CheckCircle,
-} from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
-import { API_BASE_URL, getCurrentUserId, fetchHistory } from '../services/api';
-import { useDialog } from '../components/DialogProvider';
-import './Profile.css';
+  BarChartIcon, BookmarkIcon, ClockIcon, FilmIcon, HeartIcon,
+  LogOutIcon, PlayIcon, StarIcon, SettingsIcon, EditIcon, XIcon,
+  TrophyIcon, FlameIcon, MessageIcon, DownloadIcon,
+} from '../components/icons';
 
-const readUser = () => {
-  try { return JSON.parse(localStorage.getItem('mahistream_user') || 'null'); } catch { return null; }
+const BADGE_ICONS = {
+  play: PlayIcon, film: FilmIcon, fire: FlameIcon, trophy: TrophyIcon,
+  bookmark: BookmarkIcon, clock: ClockIcon, star: StarIcon, chat: MessageIcon, heart: HeartIcon,
 };
 
-const ASSUMED_EPISODE_DURATION = 24 * 60; // 24 menit/episode untuk fallback
-
-const formatWatchTime = (seconds) => {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '0 menit';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} menit`;
-  const hours = Math.floor(minutes / 60);
-  const restMin = minutes % 60;
-  if (hours < 24) return restMin === 0 ? `${hours} jam` : `${hours} jam ${restMin}m`;
-  const days = Math.floor(hours / 24);
-  const restHr = hours % 24;
-  return restHr === 0 ? `${days} hari` : `${days} hari ${restHr}j`;
-};
+function fmtMin(sec) {
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m} mnt`;
+  return `${Math.floor(m / 60)} jam ${m % 60} mnt`;
+}
 
 export default function Profile() {
-  const navigate = useNavigate();
-  const { toast } = useDialog();
-  const [user, setUser] = useState(readUser);
-  const [stats, setStats] = useState({ history: 0, bookmark: 0, watchedSeconds: 0 });
-  const [bannerUrl, setBannerUrl] = useState(() => readUser()?.background_url || '');
-  const [bio, setBio] = useState(() => readUser()?.bio || '');
-  const [showEdit, setShowEdit] = useState(false);
+  const { toast } = useToast();
+  const [tab, setTab] = useState("history");
+  const [hist, setHist] = useState([]);
+  const [bm, setBm] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("Penonton");
+  const [loggedIn, setLoggedIn] = useState(() => Boolean(typeof localStorage !== "undefined" && localStorage.getItem("mahi-user")));
+  const [profileData, setProfileData] = useState(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [bioDraft, setBioDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
-  const [editName, setEditName] = useState('');
-  const [editPicture, setEditPicture] = useState('');
-  const [editBanner, setEditBanner] = useState('');
-  const [editBio, setEditBio] = useState('');
-  const fileInputRef = useRef(null);
-  const bannerInputRef = useRef(null);
-  const [imagePreview, setImagePreview] = useState({ avatar: null, banner: null });
+  const load = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      api(`/history?userId=${uid()}`).catch(() => []),
+      api(`/bookmarks/${uid()}`).catch(() => []),
+    ]).then(([h, b]) => {
+      const raw = Array.isArray(h) ? h : [];
+      const seen = {};
+      raw.forEach(item => {
+        const key = item.anime_id || item.animeId;
+        if (!key || !seen[key] || new Date(item.watched_at) > new Date(seen[key].watched_at)) seen[key] = item;
+      });
+      setHist(Object.values(seen));
+      setBm(Array.isArray(b) ? b : []);
+    }).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
 
-  // Hitung jumlah bookmark dari localStorage (instant).
   useEffect(() => {
-    try {
-      const userId = getCurrentUserId();
-      const u1 = JSON.parse(localStorage.getItem(`mahistream_bookmarks_umum_${userId}`) || '[]');
-      const u2 = JSON.parse(localStorage.getItem(`mahistream_bookmarks_khusus_${userId}`) || '[]');
-      const local = (Array.isArray(u1) ? u1.length : 0) + (Array.isArray(u2) ? u2.length : 0);
-      setStats((p) => ({ ...p, bookmark: local }));
-    } catch {}
+    api(`/user/profile?userId=${uid()}`).then(d => {
+      setProfileData(d);
+      setName(d?.display_name || getProfile().displayName || "Penonton");
+    }).catch(() => {});
   }, []);
 
-  // Fetch history dari backend untuk akurasi waktu tonton.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const userId = getCurrentUserId();
-        // Profile aggregate endpoint sudah ada di backend, prioritaskan ini
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 8000);
-        const res = await fetch(`${API_BASE_URL}/profile/me?userId=${encodeURIComponent(userId)}`, { signal: ctrl.signal });
-        clearTimeout(t);
-        if (res.ok && !cancelled) {
-          const json = await res.json();
-          const d = json?.data || {};
-          if (d.user?.background_url) setBannerUrl(d.user.background_url);
-          if (typeof d.user?.bio === 'string') setBio(d.user.bio);
-          setStats((p) => ({
-            ...p,
-            history: d.counts?.history ?? p.history,
-            bookmark: d.counts?.bookmark ?? p.bookmark,
-            watchedSeconds: Number(d.totalWatchedSeconds) || p.watchedSeconds,
-          }));
-        }
-        // Fallback / koreksi: hitung dari history list sendiri. Logika:
-        // - Kalau row punya progress_seconds valid, pakai itu (di-cap ke
-        //   duration_seconds bila tersedia, supaya seek tidak menggembungkan
-        //   total — pengaman dari progress yang melebihi durasi).
-        // - Kalau progress 0 atau hilang, abaikan (anggap belum tonton).
-        //   Sebelumnya kita auto-add ASSUMED_EPISODE_DURATION yang membuat
-        //   user yang membuka detail anime tanpa nonton tetap kehitung 24m.
-        try {
-          const list = await fetchHistory(userId);
-          if (Array.isArray(list) && !cancelled) {
-            let total = 0;
-            list.forEach((h) => {
-              const s = Number(h.progress_seconds);
-              const dur = Number(h.duration_seconds);
-              if (Number.isFinite(s) && s > 0) {
-                const capped = Number.isFinite(dur) && dur > 0 ? Math.min(s, dur) : s;
-                total += Math.max(0, capped);
-              }
-            });
-            setStats((p) => ({
-              ...p,
-              history: list.length,
-              // Prefer angka backend; FE hanya pakai bila backend belum
-              // mengembalikan total (mis. endpoint legacy).
-              watchedSeconds: p.watchedSeconds > 0 ? p.watchedSeconds : total,
-            }));
-          }
-        } catch {}
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [user]);
+  const watchTime = profileData?.total_watch_seconds || 0;
+  const animeCompleted = profileData?.anime_completed || 0;
+  const genreCount = {};
+  hist.forEach(h => { (h.genres || h.anime?.genres || []).forEach(g => { genreCount[g] = (genreCount[g] || 0) + 1; }); });
+  const topGenre = Object.entries(genreCount).sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+
+  const stats = [
+    { label: "Anime Selesai", value: animeCompleted, Icon: FilmIcon },
+    { label: "Waktu Tonton", value: fmtMin(watchTime), Icon: ClockIcon },
+    { label: "Bookmark", value: bm.length, Icon: BookmarkIcon },
+    { label: "Genre Favorit", value: topGenre, Icon: HeartIcon },
+  ];
 
   useEffect(() => {
-    if (showEdit) {
-      const u = readUser();
-      setEditName(u?.name || '');
-      setEditPicture(u?.picture || '');
-      setEditBanner(bannerUrl || '');
-      setEditBio(bio || '');
-    }
-  }, [showEdit, bannerUrl, bio]);
+    setName(getProfile().displayName || "Penonton");
+    setLoggedIn(Boolean(localStorage.getItem("mahi-user")));
+  }, []);
 
-  const processImage = async (file, maxDim, quality = 0.85) => {
-    if (!file) return null;
-    if (file.size > 10 * 1024 * 1024) {
-      toast('Foto maksimal 10MB', { tone: 'error' });
-      return null;
-    }
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    const img = new Image();
-    img.src = dataUrl;
-    await new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; });
-    const ratio = Math.min(1, maxDim / Math.max(img.width || maxDim, img.height || maxDim));
-    const w = Math.max(1, Math.round((img.width || maxDim) * ratio));
-    const h = Math.max(1, Math.round((img.height || maxDim) * ratio));
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, w, h);
-    return canvas.toDataURL('image/jpeg', quality) || dataUrl;
+  const logout = () => {
+    localStorage.removeItem("mahi-token");
+    localStorage.removeItem("mahi-user");
+    setLoggedIn(false);
+    try { window.location.reload(); } catch {}
   };
 
-  // Native picker pakai Camera plugin dari Capacitor — fallback ke <input file>
-  // jika gagal/tidak tersedia. Tujuan: tombol upload PP/banner berfungsi di HP
-  // (WebView Capacitor kadang tidak memicu file picker sistem).
-  const pickImage = async (kind /* 'avatar' | 'banner' */) => {
-    const maxDim = kind === 'banner' ? 1280 : 512;
-    const quality = kind === 'banner' ? 0.82 : 0.85;
+  const toBase64 = (file) => new Promise((r) => {
+    const fr = new FileReader();
+    fr.onload = () => r(fr.result);
+    fr.readAsDataURL(file);
+  });
+
+  const saveProfileServer = async (patch) => {
+    setSaving(true);
     try {
-      if (Capacitor.isNativePlatform?.()) {
-        try {
-          // String dipecah supaya Vite tidak coba resolve modul saat build
-          // web — @capacitor/camera hanya ada di build APK.
-          const CAM_MOD = ['@capacitor', 'camera'].join('/');
-          const mod = await import(/* @vite-ignore */ CAM_MOD);
-          const { Camera, CameraResultType, CameraSource } = mod;
-          
-          // Minta izin kamera/galeri
-          const permissions = await Camera.checkPermissions();
-          if (permissions.camera === 'prompt' || permissions.photos === 'prompt') {
-            const requested = await Camera.requestPermissions();
-            if (requested.camera === 'denied' || requested.photos === 'denied') {
-              toast('Izin kamera/galeri diperlukan untuk memilih foto', { tone: 'error' });
-              return;
-            }
-          }
-          
-          const photo = await Camera.getPhoto({
-            resultType: CameraResultType.DataUrl,
-            source: CameraSource.Photos,
-            quality: 90,
-            allowEditing: false,
-          });
-          if (photo?.dataUrl) {
-            const img = new Image();
-            img.src = photo.dataUrl;
-            await new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; });
-            const ratio = Math.min(1, maxDim / Math.max(img.width || maxDim, img.height || maxDim));
-            const w = Math.max(1, Math.round((img.width || maxDim) * ratio));
-            const h = Math.max(1, Math.round((img.height || maxDim) * ratio));
-            const canvas = document.createElement('canvas');
-            canvas.width = w; canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, w, h);
-            const finalUrl = canvas.toDataURL('image/jpeg', quality);
-            if (kind === 'banner') {
-              setEditBanner(finalUrl);
-              setImagePreview(prev => ({ ...prev, banner: finalUrl }));
-            } else {
-              setEditPicture(finalUrl);
-              setImagePreview(prev => ({ ...prev, avatar: finalUrl }));
-            }
-            toast('Foto dipilih', { tone: 'success' });
-            return;
-          }
-        } catch (e) {
-          if (e && /cancel/i.test(String(e?.message || ''))) return;
-        }
+      const d = await api("/user/profile", "POST", { userId: uid(), ...patch }).catch(() => null);
+      if (d?.user || d?.profile) {
+        const u = d.user || d.profile;
+        if (u.display_name) setName(u.display_name);
+        if (u.bio !== undefined) setProfileData(p => ({ ...p, ...u }));
       }
-    } catch {}
-    // Fallback: native input file (web atau plugin tidak ada)
-    if (kind === 'banner') bannerInputRef.current?.click();
-    else fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const compressed = await processImage(file, 512, 0.85);
-      if (compressed) setEditPicture(compressed);
+      toast("Profil disimpan");
     } catch {
-      toast('Gagal memproses foto', { tone: 'error' });
+      toast("Gagal menyimpan profil");
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleBannerChange = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    try {
-      const compressed = await processImage(file, 1280, 0.82);
-      if (compressed) setEditBanner(compressed);
-    } catch {
-      toast('Gagal memproses banner', { tone: 'error' });
-    }
-  };
+  const MAX_AVATAR_SIZE = 2 * 1024 * 1024; // 2 MB
 
-  const handleSaveProfile = async () => {
-    const nextLocal = {
-      ...(user || {}),
-      name: (editName || '').trim() || (user?.name || 'Pengguna'),
-      picture: editPicture || user?.picture || '',
-      email: user?.email || '',
-      background_url: editBanner || '',
-      bio: (editBio || '').trim() || '',
-    };
-    try {
-      localStorage.setItem('mahistream_user', JSON.stringify(nextLocal));
-    } catch {
-      toast('Foto/banner terlalu besar, kecilkan dulu', { tone: 'error' });
+  const onAvatar = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > MAX_AVATAR_SIZE) {
+      toast(`Ukuran foto terlalu besar (maks. 2 MB)`, 'error');
+      e.target.value = '';
       return;
     }
-    setUser(nextLocal);
-    setBannerUrl(nextLocal.background_url);
-    setBio(nextLocal.bio);
-    setShowEdit(false);
-    setImagePreview({ avatar: null, banner: null });
-    toast('Profil tersimpan', { tone: 'success' });
-
-    // Sync ke backend (best-effort, tidak menahan UI).
-    try {
-      const userId = getCurrentUserId();
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 8000);
-      await fetch(`${API_BASE_URL}/profile/update`, {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          name: nextLocal.name,
-          bio: nextLocal.bio,
-          picture: nextLocal.picture,
-          background_url: nextLocal.background_url,
-        }),
-      });
-      clearTimeout(t);
-    } catch { /* offline ok */ }
+    const b64 = await toBase64(f);
+    setProfileData(p => ({ ...p, picture: b64 }));
+    await saveProfileServer({ picture: b64 });
   };
 
-  const initials = (user?.name || user?.email || 'M').slice(0, 1).toUpperCase();
-  const displayName = user?.name || (user ? 'Pengguna' : 'Tamu');
-  const displayEmail = user?.email || 'Belum login';
-  const watchTimeLabel = formatWatchTime(stats.watchedSeconds);
+  const raw = JSON.parse(localStorage.getItem("mahi-user") || "{}");
+  const user = raw.user || raw;
 
   return (
-    <div className="min-h-screen bg-bg text-text pb-28 profile-layout">
-      <div className="relative">
-        <div className="profile-cover">
-          {bannerUrl ? (
-            <img src={bannerUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
-          ) : (
-            <div className="profile-hero-bg absolute inset-0">
-              <div className="profile-orb" style={{ width: 180, height: 180, top: -60, left: -40, background: 'rgba(255,255,255,0.18)' }} />
-              <div className="profile-orb" style={{ width: 140, height: 140, top: 20, right: -30, background: 'rgba(255,255,255,0.12)' }} />
-            </div>
-          )}
-          <div className="profile-cover-fade" />
-
-          <div className="absolute top-0 left-0 right-0 px-5 pt-6 z-10">
-            <div className="max-w-6xl mx-auto flex items-center justify-between">
-              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 backdrop-blur-md border border-white/15 text-white text-[11px] font-bold uppercase tracking-[0.16em]">
-                <User size={11} /> Profil
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigate('/inbox')}
-                  className="w-9 h-9 rounded-full bg-black/40 hover:bg-black/55 backdrop-blur-md border border-white/15 text-white flex items-center justify-center transition active:scale-95"
-                  aria-label="Notifikasi"
-                  title="Notifikasi"
-                >
-                  <Bell size={15} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate('/settings')}
-                  className="w-9 h-9 rounded-full bg-black/40 hover:bg-black/55 backdrop-blur-md border border-white/15 text-white flex items-center justify-center transition active:scale-95"
-                  aria-label="Pengaturan"
-                  title="Pengaturan"
-                >
-                  <SettingsIcon size={15} />
-                </button>
-              </div>
-            </div>
+    <Shell>
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="flex flex-1 items-center gap-4">
+          <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-elevated sm:h-20 sm:w-20">
+            {profileData?.picture ? (
+              <img src={profileData.picture} alt={name} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+              </svg>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-extrabold tracking-tight text-ink sm:text-2xl">{name}</h1>
+            <p className="truncate text-xs text-muted">{user?.username || "—"}</p>
+            {user?.email ? <p className="truncate text-xs text-muted">{user.email}</p> : null}
+            {profileData?.bio ? (
+              <p className="mt-1.5 line-clamp-2 text-sm text-muted">{profileData.bio}</p>
+            ) : null}
           </div>
         </div>
-
-        <div className="max-w-6xl mx-auto px-5 -mt-12 relative z-10">
-          <div className="max-w-xl mx-auto">
-            <div className="flex flex-col items-center gap-3 mb-4 text-center">
-              <div className="relative shrink-0">
-                <div className="profile-avatar-wrap">
-                  {user?.picture ? (
-                    <img src={user.picture} alt={displayName} className="w-[96px] h-[96px] rounded-full object-cover bg-surface" />
-                  ) : (
-                    <div className="profile-avatar-fallback w-[96px] h-[96px] rounded-full flex items-center justify-center font-black text-3xl text-primary">
-                      {initials}
-                    </div>
-                  )}
-                  {user && <span className="profile-presence-dot" aria-hidden />}
-                </div>
-              </div>
-              <div className="w-full flex flex-col items-center">
-                <h2 className="text-[20px] font-black text-text tracking-tight leading-tight w-full truncate">{displayName}</h2>
-                <p className="text-[13px] text-text-secondary font-medium leading-relaxed truncate flex items-center justify-center gap-1.5 mt-1 w-full">
-                  <Mail size={12} className="shrink-0 text-primary" />
-                  {displayEmail}
-                </p>
-              </div>
-            </div>
-
-            {bio && (
-              <div className="bg-surface border border-border rounded-2xl px-4 py-3 mb-4">
-                <p className="text-[13.5px] text-text font-medium leading-relaxed whitespace-pre-wrap break-words">{bio}</p>
-              </div>
-            )}
-
-            {/* Stats: hanya Ditonton & Favorit — points/streak dihapus */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <button
-                type="button"
-                onClick={() => navigate('/history')}
-                className="profile-stat-pill"
-                style={{ '--accent': 'var(--color-primary)' }}
-                aria-label="Lihat riwayat tontonan"
-              >
-                <Clock size={18} className="profile-stat-pill-icon text-primary" />
-                <span className="profile-stat-pill-value">{watchTimeLabel}</span>
-                <span className="profile-stat-pill-label">Ditonton</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/bookmark')}
-                className="profile-stat-pill"
-                style={{ '--accent': '#f43f5e' }}
-                aria-label="Buka favorit"
-              >
-                <Heart size={18} className="profile-stat-pill-icon text-rose-500" />
-                <span className="profile-stat-pill-value">{stats.bookmark}</span>
-                <span className="profile-stat-pill-label">Favorit</span>
-              </button>
-            </div>
-
-            {/* Hanya tombol Edit Profil — tombol Trophy + LogOut dihapus.
-                Logout dipindah ke halaman /settings. */}
-            <div className="flex gap-2.5 mb-2">
-              {user ? (
-                <button
-                  type="button"
-                  onClick={() => setShowEdit(true)}
-                  className="flex-1 inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-white font-bold py-3 rounded-2xl text-[14px] shadow-lg shadow-primary/30 transition-all active:scale-95"
-                >
-                  <Edit3 size={15} /> Edit Profil
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => navigate('/login')}
-                  className="flex-1 inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-white font-bold py-3 rounded-2xl text-[14px] shadow-lg shadow-primary/30 transition-all active:scale-95"
-                >
-                  <LogIn size={15} /> Login Google
-                </button>
-              )}
-            </div>
-          </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+          <button onClick={() => { setNameDraft(name); setBioDraft(profileData?.bio || ""); setEditOpen(true); }}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-line px-3 text-xs font-semibold text-ink transition hover:bg-elevated sm:h-10 sm:text-sm"
+            aria-label="Edit Profil">
+            <EditIcon size={14} /> <span className="whitespace-nowrap">Edit</span>
+          </button>
+          <Link to="/downloads"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition hover:text-ink sm:h-10 sm:w-10"
+            aria-label="Unduhan Offline">
+            <DownloadIcon size={16} />
+          </Link>
+          <Link to="/settings"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition hover:text-ink sm:h-10 sm:w-10"
+            aria-label="Pengaturan">
+            <SettingsIcon size={16} />
+          </Link>
+          {!loggedIn ? (
+            <Link to="/login"
+              className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-accent bg-accent px-3 text-xs font-semibold text-white sm:h-10 sm:text-sm">
+              Masuk
+            </Link>
+          ) : (
+            <button onClick={logout}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line text-muted transition hover:text-ink sm:h-10 sm:w-10"
+              aria-label="Keluar">
+              <LogOutIcon size={16} />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Edit Profile modal — ala nanimeid, banner + avatar + nama + bio */}
-      {showEdit && (
-        <div
-          className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-md p-0 sm:p-4 animate-fade-in"
-          onClick={() => setShowEdit(false)}
-        >
-          <div
-            className="bg-surface border-t sm:border border-border rounded-t-[32px] sm:rounded-[28px] max-w-md w-full shadow-2xl flex flex-col"
-            style={{ maxHeight: '92vh' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="shrink-0 px-6 pt-5 pb-4 border-b border-border bg-surface rounded-t-[32px] sm:rounded-t-[28px]">
-              <div className="sm:hidden mx-auto -mt-2 mb-3 w-12 h-1.5 rounded-full bg-text-muted/30" />
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="w-10 h-10 rounded-2xl bg-primary/15 text-primary flex items-center justify-center border border-primary/25">
-                    <Edit3 size={16} />
-                  </span>
-                  <div>
-                    <h3 className="text-[15px] font-black text-text leading-tight">Edit Profil</h3>
-                    <p className="text-[11px] text-text-secondary font-medium leading-tight mt-0.5">
-                      Atur foto, banner, nama dan bio
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowEdit(false)}
-                  className="w-9 h-9 rounded-2xl bg-surface-highlight hover:bg-border text-text-muted hover:text-text transition flex items-center justify-center active:scale-95 shrink-0"
-                  aria-label="Tutup"
-                >
-                  <X size={16} />
-                </button>
-              </div>
+      {/* edit profile modal (one place: name + bio + avatar) */}
+      {editOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+          onClick={() => setEditOpen(false)}>
+          <div className="w-full max-w-md rounded-t-3xl border border-line bg-surface p-5 sm:rounded-3xl"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-bold text-ink">Edit Profil</h2>
+              <button onClick={() => setEditOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-muted"><XIcon size={14} /></button>
             </div>
-
-            <div
-              className="flex-1 overflow-y-auto custom-scrollbar px-6 pt-5 pb-8"
-              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}
-            >
-              <div className="space-y-5">
-                <div>
-                  <span className="block text-[11px] font-black uppercase tracking-[0.18em] text-text-muted mb-2">Banner Cover</span>
-                  <button
-                    type="button"
-                    onClick={() => pickImage('banner')}
-                    className="relative w-full h-32 rounded-2xl overflow-hidden border-2 border-dashed border-border hover:border-primary/50 transition-all bg-surface-highlight group"
-                  >
-                    {editBanner ? (
-                      <>
-                        <img src={editBanner} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 text-text text-[12px] font-bold">
-                            <Camera size={13} /> Ganti Banner
-                          </span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-muted">
-                        <ImagePlus size={26} />
-                        <span className="text-[13px] font-bold">Pilih gambar banner</span>
-                        <span className="text-[11px] font-medium">Rekomendasi 1280×400</span>
-                      </div>
-                    )}
-                  </button>
-                  {editBanner && (
-                    <button
-                      type="button"
-                      onClick={() => setEditBanner('')}
-                      className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-bold text-red-500 hover:underline"
-                    >
-                      <X size={11} /> Hapus banner
-                    </button>
-                  )}
-                  <input ref={bannerInputRef} type="file" accept="image/*" onChange={handleBannerChange} className="sr-only" />
-                </div>
-
-                <div className="flex flex-col items-center gap-3 py-2">
-                  <button type="button" onClick={() => pickImage('avatar')} className="relative group" aria-label="Ubah foto profil">
-                    {editPicture ? (
-                      <img src={editPicture} alt="" className="w-28 h-28 rounded-full object-cover border-4 border-border shadow-lg" />
-                    ) : (
-                      <div className="w-28 h-28 rounded-full bg-primary/15 text-primary border-4 border-primary/30 flex items-center justify-center font-black text-4xl shadow-lg">
-                        {(editName || initials).slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <Camera size={26} className="text-white" />
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => pickImage('avatar')}
-                    className="inline-flex items-center gap-1.5 text-[13px] font-bold text-primary hover:underline"
-                  >
-                    <Camera size={13} /> Ganti Foto
-                  </button>
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="sr-only" />
-                </div>
-
-                <label className="block">
-                  <span className="block text-[11px] font-black uppercase tracking-[0.18em] text-text-muted mb-2">Nama Tampilan</span>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder="Masukkan nama"
-                    maxLength={32}
-                    className="w-full bg-surface-highlight border border-border rounded-2xl px-4 py-3 text-text outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary text-[14px] font-medium"
-                  />
-                  <span className="text-[11px] text-text-muted font-bold mt-1.5 block px-1">{editName.length}/32</span>
-                </label>
-
-                <label className="block">
-                  <span className="block text-[11px] font-black uppercase tracking-[0.18em] text-text-muted mb-2">Bio</span>
-                  <textarea
-                    value={editBio}
-                    onChange={(e) => setEditBio(e.target.value)}
-                    placeholder="Tulis sesuatu tentang dirimu..."
-                    maxLength={280}
-                    rows={3}
-                    className="w-full bg-surface-highlight border border-border rounded-2xl px-4 py-3 text-text outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary text-[14px] font-medium resize-none"
-                  />
-                  <span className="text-[11px] text-text-muted font-bold mt-1.5 block px-1">{editBio.length}/280</span>
-                </label>
-
-                {user?.email && (
-                  <div className="px-4 py-3 rounded-2xl bg-surface-highlight border border-border">
-                    <p className="text-[11px] font-black uppercase tracking-[0.18em] text-text-muted mb-1">Email Akun</p>
-                    <p className="text-[13px] font-bold text-text truncate">{user.email}</p>
-                    <p className="text-[11px] text-text-muted font-medium mt-1 leading-relaxed">
-                      Email mengikuti akun Google dan tidak bisa diubah dari aplikasi.
-                    </p>
-                  </div>
-                )}
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowEdit(false)}
-                    className="flex-1 bg-surface-highlight hover:bg-border text-text-secondary font-bold py-3 rounded-2xl text-sm active:scale-95 transition-all"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveProfile}
-                    className="flex-1 inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-white font-bold py-3 rounded-2xl shadow-md shadow-primary/30 text-sm active:scale-95 transition-all"
-                  >
-                    <Save size={14} /> Simpan
-                  </button>
-                </div>
-              </div>
+            <label className="relative mx-auto mb-4 flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-elevated">
+              {profileData?.picture ? (
+                <img src={profileData.picture} alt={name} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+              ) : (
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+                </svg>
+              )}
+              <span className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white">
+                <EditIcon size={12} />
+              </span>
+              <input type="file" accept="image/*" onChange={onAvatar} className="hidden" />
+            </label>
+            <label className="mb-1 block text-xs font-semibold text-muted">Nama Tampilan</label>
+            <input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              className="input mb-3 h-10 w-full text-sm text-ink"
+              placeholder="Nama tampilan"
+            />
+            <label className="mb-1 block text-xs font-semibold text-muted">Deskripsi Akun</label>
+            <textarea
+              value={bioDraft}
+              onChange={(e) => setBioDraft(e.target.value)}
+              rows={3}
+              className="input mb-4 w-full resize-none text-sm text-ink"
+              placeholder="Ceritakan sedikit tentang akun kamu"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setEditOpen(false)}
+                className="flex h-10 flex-1 items-center justify-center rounded-xl border border-line text-sm font-semibold text-muted">
+                Batal
+              </button>
+              <button onClick={() => {
+                const next = { ...getProfile(), displayName: nameDraft.trim() || "Penonton" };
+                setProfile(next); setName(next.displayName);
+                setProfileData(p => ({ ...p, bio: bioDraft }));
+                setEditOpen(false);
+                saveProfileServer({ display_name: next.displayName, bio: bioDraft });
+              }}
+                disabled={saving}
+                className="flex h-10 flex-1 items-center justify-center rounded-xl border border-accent bg-accent text-sm font-semibold text-white disabled:opacity-60">
+                {saving ? "Menyimpan…" : "Simpan"}
+              </button>
             </div>
           </div>
         </div>
       )}
-    </div>
+
+      {/* stats */}
+      <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+        {stats.map(({ label, value, Icon }) => (
+          <div key={label} className="rounded-xl border border-line bg-surface p-3 sm:rounded-2xl sm:p-4">
+            <div className="mb-1.5 flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent sm:mb-2 sm:h-9 sm:w-9 sm:rounded-xl">
+              <Icon size={16} />
+            </div>
+            <div className="truncate text-base font-extrabold text-ink sm:text-lg">{value}</div>
+            <div className="truncate text-[10px] text-muted sm:text-xs">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* badges */}
+      {profileData?.badges?.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-line bg-surface p-4 sm:p-5">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-ink sm:mb-4 sm:text-base">
+            <TrophyIcon size={16} className="text-accent sm:size-4" /> Lencana
+          </h2>
+          <div className="flex flex-wrap gap-2 sm:gap-3">
+            {profileData.badges.map(b => {
+              const BIcon = BADGE_ICONS[b.icon] || TrophyIcon;
+              return (
+                <div key={b.id} className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-2.5 py-1.5 sm:px-3 sm:py-2" title={b.desc}>
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/20 text-accent sm:h-8 sm:w-8">
+                    <BIcon size={14} />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold text-ink sm:text-xs">{b.name}</p>
+                    <p className="text-[9px] text-muted sm:text-[10px]">{b.desc}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* genre insights */}
+      {Object.keys(genreCount).length > 0 && (
+        <div className="mb-6 rounded-2xl border border-line bg-surface p-4 sm:p-5">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-bold text-ink sm:mb-4 sm:text-base">
+            <BarChartIcon size={16} className="text-accent" /> Genre Paling Ditonton
+          </h2>
+          <div className="space-y-2.5">
+            {Object.entries(genreCount).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([genre, count]) => {
+              const max = Object.values(genreCount).sort((a, b) => b - a)[0] || 1;
+              const pct = Math.round((count / max) * 100);
+              return (
+                <div key={genre}>
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="font-medium text-ink">{genre}</span>
+                    <span className="text-muted">{count} kali</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-elevated">
+                    <div className="h-full rounded-full bg-gradient-to-r from-accent to-caramel" style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-5 flex gap-2 rounded-xl border border-line bg-surface p-1">
+        {["history", "bookmark"].map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={cx("flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition", tab === t ? "bg-accent text-white glow-accent" : "text-muted")}>
+            {t === "history" ? <><ClockIcon size={15} /> Riwayat</> : <><BookmarkIcon size={15} /> Bookmark</>}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-16"><Spinner /></div>
+      ) : tab === "history" ? (
+        hist.length ? (
+          <div className="space-y-2">
+            {hist.map((h, i) => (
+              <Link key={h.id || i} to={`/video/${h.anime_id}`}
+                className="card-hover flex gap-3 rounded-2xl border border-line bg-surface p-2.5">
+                <div className="h-16 w-12 shrink-0 overflow-hidden rounded-lg bg-elevated">
+                  <Poster title={h.title} poster={h.poster_url} />
+                </div>
+                <div className="min-w-0 flex-1 py-0.5">
+                  <p className="line-clamp-1 text-sm font-semibold text-ink">{h.title}</p>
+                  <p className="text-xs text-muted">Episode {h.episode} · {fmtDate(h.watched_at)}</p>
+                </div>
+                <span className="flex self-center text-accent"><PlayIcon size={16} className="ml-0.5 fill-current" /></span>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="Belum ada riwayat" icon={<ClockIcon size={28} />} />
+        )
+      ) : bm.length ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {bm.map((b) => <AnimeCard key={b.anime_id || b.id} anime={b.anime || b} />)}
+        </div>
+      ) : (
+        <EmptyState title="Belum ada bookmark" icon={<BookmarkIcon size={28} />} />
+      )}
+    </Shell>
   );
 }

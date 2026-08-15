@@ -1,32 +1,26 @@
 {
-  "appId": "com.mahistream.hd",
-  "appName": "mahistream",
+  "appId": "com.mahistream.app",
+  "appName": "MahiStream",
   "webDir": "dist",
-  "server": {
-    "cleartext": true,
-    "androidScheme": "http"
-  },
   "android": {
-    "webContentsDebuggingEnabled": false,
-    "allowMixedContent": false
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
   },
   "plugins": {
-    "SplashScreen": {
-      "launchShowDuration": 200,
-      "launchAutoHide": true,
-      "backgroundColor": "#FFE5B4",
-      "androidSplashResourceName": "splash",
-      "androidScaleType": "CENTER_CROP",
-      "showSpinner": false,
-      "splashFullScreen": true,
-      "splashImmersive": true,
-      "launchFadeOutDuration": 100
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_mahistream",
+      "iconColor": "#E11D48",
+      "sound": "mahistream_notif"
     },
-    "GoogleAuth": {
-      "scopes": ["profile", "email"],
-      "serverClientId": "632438660940-tcvha04g67vg492qlr8f1jiufg6vmj5k.apps.googleusercontent.com",
-      "forceCodeForRefreshToken": true
+    "GoogleSignIn": {
+      "clientId": "843035088451-oftajg1gqg6e2tks7gp0tfuu27028769.apps.googleusercontent.com",
+      "scopes": ["profile", "email"]
+    },
+    "SplashScreen": {
+      "launchShowDuration": 1000,
+      "launchAutoHide": true,
+      "backgroundColor": "#0c0a09"
     }
   }
 }
-

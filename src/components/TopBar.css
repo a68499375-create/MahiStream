@@ -1,4 +1,3 @@
-/* TopBar - NanimeID style */
 .top-bar {
   position: fixed;
   top: 0;
@@ -6,8 +5,12 @@
   right: 0;
   z-index: 60;
   height: 64px;
-  background: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
+  background: #0D0D0D;
+  border-bottom: 1px solid rgba(42, 42, 42, 0.5);
+}
+html.light .top-bar {
+  background: var(--surface);
+  border-bottom-color: var(--border);
 }
 
 .top-bar-inner {
@@ -33,7 +36,7 @@
 .logo-mark {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, #FF66CD, #EC4899);
+  background: linear-gradient(135deg, #F59E0B, #D97706);
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -42,7 +45,7 @@
   font-size: 20px;
   font-weight: 900;
   color: #FFFFFF;
-  box-shadow: 0 0 20px rgba(255, 102, 205, 0.4);
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
 }
 
 .logo-text {
@@ -51,52 +54,47 @@
   font-weight: 900;
   line-height: 1;
   letter-spacing: -0.5px;
-  color: #FFFFFF;
+  color: var(--text, #FFFFFF);
 }
 
-.logo-main {
-  color: #FFFFFF;
-}
-
-.logo-accent {
-  color: #FF66CD;
-}
+.logo-main { color: var(--accent, #FBBF24); }
+.logo-accent { color: var(--text, #FFFFFF); }
+html.light .logo-accent { color: var(--text); }
 
 .search-btn {
   width: 44px;
   height: 44px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--color-border);
+  border: 1px solid rgba(42, 42, 42, 0.8);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-secondary);
+  color: #AAAAAA;
   transition: all 0.2s ease;
 }
-
 .search-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 102, 205, 0.5);
-  color: #FFFFFF;
+  border-color: rgba(245, 158, 11, 0.5);
+  color: var(--text, #FFFFFF);
 }
-
+html.light .search-btn {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: var(--border);
+  color: var(--muted);
+}
+html.light .search-btn:hover {
+  background: rgba(0, 0, 0, 0.07);
+  border-color: var(--accent);
+  color: var(--text);
+}
 .search-btn:focus-visible {
   outline: 2px solid #FF66CD;
   outline-offset: 2px;
 }
 
 @media (max-width: 768px) {
-  .top-bar-inner {
-    padding: 0 16px;
-  }
-  
-  .logo-text {
-    font-size: 24px;
-  }
-  
-  .search-btn {
-    width: 40px;
-    height: 40px;
-  }
+  .top-bar-inner { padding: 0 16px; }
+  .logo-text { font-size: 24px; }
+  .search-btn { width: 40px; height: 40px; }
 }

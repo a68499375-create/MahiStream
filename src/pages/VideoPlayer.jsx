@@ -1,3838 +1,1720 @@
-import { ArrowLeft, Play, Pause, Maximize, Share2, Download, Bookmark, Star, Database, Lock, Unlock, SkipBack, SkipForward, CloudOff, CheckCircle2, Clock, List, LayoutGrid, Heart, RotateCcw, RotateCw, MessageCircle, Send, ThumbsUp, Trash2, CornerDownRight, Gauge, ChevronRight, ChevronDown, Search, Filter, FastForward, AlertTriangle, X } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
+import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback, useMemo, Component } from 'react';
+import { api, uid, fmtTime, API_BASE } from '../lib/client';
+import { getPlayback } from '../lib/prefs';
+import { cx, Spinner, StatusPill } from '../components/ui/index';
+import Shell from '../components/Shell';
+import { toggleBookmark } from '../services/api';
+import { useToast } from '../components/Toast';
+import {
+  LockIcon, LockOpenIcon, PlayIcon, PauseIcon, RewindCurveIcon, ForwardCurveIcon, SkipBackEpIcon, SkipForwardEpIcon, RewindIcon, FastForwardIcon, AspectIcon, MaximizeIcon, MinimizeIcon, PipIcon, QueueIcon, VolumeHighIcon, VolumeMuteIcon, BookmarkIcon, BookmarkFillIcon, HeartIcon, HeartFillIcon, StarIcon, EyeIcon, ListIcon, SunIcon, CameraIcon, RepeatIcon, MiniPlayerIcon, DownloadIcon, CheckCircleIcon, XIcon, GaugeIcon,
+} from '../components/icons';
+import { setMiniPlayer } from '../lib/miniPlayerStore';
+import { useDownloads, startDownload, cancelDownload, removeDownload, getLocalUrl } from '../lib/offlineStore';
+import { usePlayer } from '../lib/playerContext.jsx';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
-import { fetchSourceAnimeDetails, fetchSourceStreamUrl, searchAnimeAggregate, saveHistory, fetchSourceEpisodeDetails, API_BASE_URL, getCurrentUserId, listComments, createComment, likeComment, deleteComment, subscribeCommentsSSE } from '../services/api';
-import { startDownload as startBackgroundDownloadNative } from '../services/downloadManager';
-import { getPreference, subscribePreference } from '../utils/preferences';
-import WatchPartyControls from '../components/WatchPartyControls';
-import Hls from 'hls.js';
+
+class VideoPlayerErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null, copied: false };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('[VideoPlayer Error caught]:', error, errorInfo);
+    this.setState({ errorInfo });
+  }
+  render() {
+    if (this.state.hasError) {
+      const errMsg = this.state.error?.stack || this.state.error?.toString() || 'Unknown Error';
+      const compStack = this.state.errorInfo?.componentStack || '';
+      const fullLog = `[ERROR]: ${errMsg}\n\n[COMPONENT STACK]: ${compStack}`;
+
+      return (
+        <div className="my-4 flex flex-col items-center justify-center rounded-2xl border border-red/40 bg-surface p-5 text-ink shadow-2xl">
+          <div className="flex items-center gap-2 text-red font-bold text-base mb-1">
+            Terjadi Masalah pada Pemutar Video
+          </div>
+          <p className="text-xs text-muted mb-3 text-center">
+            Detail kode error teknis ditampilkan di bawah:
+          </p>
+          
+          <div className="w-full max-h-60 overflow-y-auto rounded-xl bg-black/90 p-3.5 border border-red/30 text-left font-mono text-[11px] text-red-400 select-all leading-relaxed whitespace-pre-wrap">
+            {fullLog}
+          </div>
+
+          <div className="mt-4 flex flex-wrap justify-center items-center gap-2">
+            <button
+              onClick={() => {
+                try {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(fullLog);
+                  } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = fullLog;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                  }
+                  this.setState({ copied: true });
+                  setTimeout(() => this.setState({ copied: false }), 2000);
+                } catch {}
+              }}
+              className="rounded-xl border border-line bg-elevated px-4 py-2 text-xs font-bold text-ink hover:bg-surface transition"
+            >
+              {this.state.copied ? 'Tersalin!' : 'Salin Kode Error'}
+            </button>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null, errorInfo: null }); window.location.reload(); }}
+              className="rounded-xl bg-accent px-5 py-2 text-xs font-bold text-white shadow transition hover:brightness-110"
+            >
+              Muat Ulang Pemutar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import './VideoPlayer.css';
 
-// Extract the real episode number. Kuramanime IDs look like
-// "1570/yuru-camp-movie/episode/12" where a naive \d+ match grabs the anime ID (1570).
-// Komponen sinopsis dengan tombol "Selengkapnya" untuk teks panjang.
-// Sebelumnya sinopsis di banner detail dipotong dengan line-clamp/truncate
-// jadi user tidak bisa baca lengkap. Sekarang clamp default 5 baris dan
-// expand penuh kalau user klik tombol.
-function SynopsisBlock({ text }) {
-  const [expanded, setExpanded] = useState(false);
-  const content = (text && text.trim()) || 'Sinopsis tidak tersedia untuk seri ini.';
-  // Anggap perlu tombol expand kalau teks > ~280 karakter (kira-kira 5 baris).
-  const needsToggle = content.length > 280;
-  return (
-    <div className="mb-8">
-      <p
-        className={`text-sm text-text-secondary font-medium leading-relaxed whitespace-pre-line ${
-          !expanded && needsToggle ? 'line-clamp-5' : ''
-        }`}
-      >
-        {content}
-      </p>
-      {needsToggle && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-3 px-4 py-2 rounded-full bg-surface-highlight hover:bg-border text-text font-bold text-xs transition active:scale-95"
-        >
-          {expanded ? 'Tampilkan lebih sedikit' : 'Selengkapnya'}
-        </button>
-      )}
-    </div>
-  );
+const IS_NATIVE = Capacitor.isNativePlatform();
+const Immersive = IS_NATIVE ? registerPlugin('Immersive') : null;
+
+async function lockLandscapeNative() {
+  if (!IS_NATIVE) return false;
+  try {
+    await ScreenOrientation.lock({ orientation: 'landscape' });
+    return true;
+  } catch { return false; }
 }
 
-const extractEpisodeNumber = (ep) => {
-  const rawId = ep.episodeId || ep.id || "";
-  const epMatch = rawId.match(/\/episode\/(\d+)/);
-  if (epMatch) return epMatch[1];
-  if (ep.number) return String(ep.number);
-  const titleMatch = (ep.title || "").match(/\d+/);
-  if (titleMatch) return titleMatch[0];
-  const idMatch = rawId.match(/\d+/);
-  return idMatch ? idMatch[0] : "1";
-};
+async function unlockOrientationNative() {
+  if (!IS_NATIVE) return;
+  try { await ScreenOrientation.unlock(); } catch {}
+}
 
-const formatEpisodeTitle = (epTitle, animeTitle) => {
-  if (!epTitle) return '';
-  const match = epTitle.match(/(Episode|Ep|OVA|OAD|Special|Batch)\s*\d+(\.\d+)?/i);
-  if (match) {
-    let str = match[0];
-    return str.charAt(0).toUpperCase() + str.slice(1);
-  }
+const FALLBACK = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+const SERVER_BASE = (API_BASE ? API_BASE.replace(/\/api$/, '') : 'https://mahistream-api-production.up.railway.app');
+const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-  let clean = epTitle;
-  if (animeTitle) {
-    const escapedTitle = animeTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(escapedTitle, 'gi');
-    clean = clean.replace(regex, '');
-  }
-  clean = clean.replace(/Subtitle Indonesia/gi, '')
-               .replace(/Sub Indo/gi, '')
-               .replace(/Subtitle/gi, '')
-               .replace(/Indo/gi, '');
-  clean = clean.replace(/^[-\s:,|()]+/, '').replace(/[-\s:,|()]+$/, '');
-  clean = clean.trim();
-  return clean || `Episode ${(epTitle.match(/\d+/) || ['?'])[0]}`;
-};
+function resolveVideoUrl(url) {
+  if (!url) return FALLBACK;
+  let resolved = url;
 
-// Ambil angka resolusi dari sebuah judul/kualitas, mis. "720p" -> 720,
-// "Mp4 1080" -> 1080, "HD" -> 0 (tak diketahui). Dipakai untuk memilih
-// resolusi TERTINGGI yang tersedia, bukan default 720p.
-const resolutionScore = (label = '') => {
-  const s = String(label).toLowerCase();
-  // Eksplisit: jika ada angka 360/480/720/1080/2160/4320 + opsional 'p'.
-  const m = s.match(/(2160|1440|1080|720|480|360|240)\s*p?/);
-  if (m) return parseInt(m[1], 10);
-  // Alias tanpa angka.
-  if (/\b(4k|uhd|ultra\s*hd)\b/.test(s)) return 2160;
-  if (/\b(2k|qhd)\b/.test(s)) return 1440;
-  if (/\b(fhd|full\s*hd|fullhd)\b/.test(s)) return 1080;
-  if (/\b(hd)\b/.test(s)) return 720;
-  if (/\b(sd)\b/.test(s)) return 480;
-  // Fallback: angka 3-4 digit pertama (kadang formatnya "Mp4 1080").
-  const any = s.match(/(\d{3,4})/);
-  return any ? parseInt(any[1], 10) : 0;
-};
-
-// Pilih item dengan resolusi tertinggi dari sebuah daftar. `getLabel`
-// mengembalikan teks yang mengandung angka resolusi untuk tiap item.
-const pickHighest = (list = [], getLabel = (x) => x?.title || x?.quality || '') => {
-  if (!Array.isArray(list) || list.length === 0) return null;
-  return list.reduce((best, cur) =>
-    resolutionScore(getLabel(cur)) > resolutionScore(getLabel(best)) ? cur : best
-  , list[0]);
-};
-
-// Urutkan server Nekopoi: dahulukan 720p (paling diminta user), lalu vidnest
-// (host .mp4), kemudian server generik, dan terakhir streamruby/streampoi yang
-// token-nya sering dikunci ke sesi embed.
-const orderNekopoiServers = (servers = []) => {
-  if (!Array.isArray(servers)) return [];
-  const rank = (srv = {}) => {
-    const haystack = `${srv.serverId || ''} ${srv.serverName || ''} ${srv.title || ''} ${srv.quality || ''}`.toLowerCase();
-    if (haystack.includes('720p') || haystack.includes('720 p')) return 0;
-    if (haystack.includes('vidnest')) return 1;
-    if (haystack.includes('streamruby') || haystack.includes('streampoi')) return 3;
-    return 2;
-  };
-  return [...servers].sort((a, b) => rank(a) - rank(b));
-};
-
-// Daftar series — list season/movie/special yang punya judul "akar" sama.
-// Cara kerja ala nanimeid: tampilkan sebagai list vertikal (poster mini di
-// kiri, judul + tag tipe TV/Movie/OVA/Special + tahun di kanan), item yang
-// sedang dibuka di-highlight dengan border + chip "Saat ini". Diurutkan
-// ASC by tahun rilis supaya user bisa menonton dari yang terlama ke yang
-// terbaru — auto-next antar season memakai urutan yang sama.
-function SeriesList({ currentTitle, currentId, activeSource, navigate }) {
-  const [items, setItems] = useState(null); // null = loading, [] = empty
-
-  // Klasifikasi tipe item (TV / Movie / OVA / Special / Recap) — sama dgn
-  // logika `seasonKey` di player tapi return label baca-manusia.
-  const classify = (title = '') => {
-    const t = String(title).toLowerCase();
-    if (/\bmovie\b|gekijouban/.test(t)) return 'Movie';
-    if (/\bspecial\b|\bsp\b/.test(t)) return 'Special';
-    if (/\bova\b/.test(t)) return 'OVA';
-    if (/\boad\b/.test(t)) return 'OAD';
-    if (/\brecap\b|compile/.test(t)) return 'Recap';
-    return 'TV';
-  };
-
-  useEffect(() => {
-    if (!currentTitle) return;
-    let cancelled = false;
-    const rootTitle = String(currentTitle)
-      .replace(/\b(season|s)\s*\d+\b/gi, '')
-      .replace(/\bpart\s*\d+\b/gi, '')
-      .replace(/\b(2nd|3rd|4th|5th)\s*season\b/gi, '')
-      .replace(/\b(movie|gekijouban|special|sp|ova|oad|recap)\b/gi, '')
-      .replace(/\([^)]*\)/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!rootTitle || rootTitle.length < 3) {
-      setItems([]);
-      return undefined;
-    }
-    const normalize = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    const rootNorm = normalize(rootTitle);
-    (async () => {
-      try {
-        const res = await searchAnimeAggregate(rootTitle);
-        if (cancelled) return;
-        if (!Array.isArray(res)) { setItems([]); return; }
-        const list = res
-          .filter((it) => {
-            const t = normalize(it.title);
-            if (!t) return false;
-            if (!t.includes(rootNorm) && !rootNorm.includes(t)) return false;
-            // Filter ketat: hanya tampilkan series yang ada di SOURCE
-            // saat ini (Kurama hanya Kurama, Nekopoi hanya Nekopoi, dst).
-            // Sebelumnya kita ikutkan Otakudesu/Kurama digabung yang
-            // memicu user-complaint "daftar series jangan digabung".
-            const itemSources = Array.isArray(it.availableSources)
-              ? it.availableSources
-              : [it._source || 'otakudesu'];
-            return itemSources.includes(activeSource);
-          })
-          .map((it) => ({
-            id: (it.sourceIds && it.sourceIds[activeSource]) || it.id,
-            title: it.title,
-            year: it.year || it.releaseYear || it.season || null,
-            poster: it.poster_url || it.posterUrl || it.poster || '',
-            source: activeSource,
-            sourceIds: it.sourceIds || { [activeSource]: it.id },
-            type: classify(it.title),
-          }))
-          .filter((it) => it.id);
-        list.sort((a, b) => {
-          const ya = parseInt(String(a.year || '').match(/\d{4}/)?.[0] || '0', 10) || 9999;
-          const yb = parseInt(String(b.year || '').match(/\d{4}/)?.[0] || '0', 10) || 9999;
-          return ya - yb;
-        });
-        // Sertakan entry "saat ini" di urutan yang benar — pakai metadata
-        // dari currentTitle. Kalau API tidak balik item yang cocok, kita
-        // tetap render placeholder supaya user lihat anime aktif.
-        const hasCurrent = list.some((it) => it.id === currentId);
-        if (!hasCurrent && currentId) {
-          list.push({
-            id: currentId,
-            title: currentTitle,
-            year: null,
-            poster: '',
-            source: activeSource,
-            sourceIds: { [activeSource]: currentId },
-            type: classify(currentTitle),
-          });
-          list.sort((a, b) => {
-            const ya = parseInt(String(a.year || '').match(/\d{4}/)?.[0] || '0', 10) || 9999;
-            const yb = parseInt(String(b.year || '').match(/\d{4}/)?.[0] || '0', 10) || 9999;
-            return ya - yb;
-          });
+  const tgApiMatch = url.match(/https?:\/\/[^\/]+(\/api\/telegram\/[-0-9a-zA-Z_]+\/\d+)/);
+  if (tgApiMatch) resolved = tgApiMatch[1];
+  else {
+    const tgStreamMatch = url.match(/https?:\/\/[^\/]+(\/tg-stream\/[^\/]+)/);
+    if (tgStreamMatch) resolved = tgStreamMatch[1];
+    else {
+      const tlMatch = url.match(/(?:t\.me|telegram\.me)\/(c\/)?([a-zA-Z0-9_-]+)\/(\d+)/);
+      if (tlMatch) {
+        const channel = tlMatch[1] ? "-100" + tlMatch[2] : tlMatch[2];
+        resolved = `/api/telegram/${channel}/${tlMatch[3]}`;
+      } else {
+        const gdriveIdMatch = url.match(/(?:drive\.google\.com|docs\.google\.com|drive\.usercontent\.google\.com)\/(?:file\/d\/|open\?id=|download\?id=)?([a-zA-Z0-9_-]{10,})/);
+        if (gdriveIdMatch) resolved = `/api/gdrive/${gdriveIdMatch[1]}`;
+        else {
+          const gdriveParamMatch = url.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+          if (gdriveParamMatch && url.includes("drive.google.com")) resolved = `/api/gdrive/${gdriveParamMatch[1]}`;
         }
-        setItems(list.slice(0, 20));
-      } catch {
-        if (!cancelled) setItems([]);
       }
-    })();
-    return () => { cancelled = true; };
-  }, [currentTitle, currentId, activeSource]);
-
-  if (!items) {
-    return (
-      <section className="bg-surface border border-border rounded-2xl p-4">
-        <h3 className="text-[14px] font-black uppercase tracking-[0.18em] text-text flex items-center gap-2.5 mb-3">
-          <span className="w-1.5 h-5 rounded-full bg-primary" />
-          Daftar Series
-        </h3>
-        <div className="flex flex-col gap-2">
-          {[0,1,2].map(i => (
-            <div key={i} className="h-16 rounded-xl bg-surface-highlight animate-pulse" />
-          ))}
-        </div>
-      </section>
-    );
+    }
   }
-  if (items.length <= 1) return null;
 
-  // Type → palette badge ala nanimeid (warna pakai token tetap, identitas
-  // brand Mahiru).
-  const typePalette = (t) => {
-    if (t === 'Movie') return 'bg-red-500/15 text-red-500 border-red-500/30';
-    if (t === 'Special') return 'bg-amber-500/15 text-amber-600 border-amber-500/30';
-    if (t === 'OVA') return 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30';
-    if (t === 'OAD') return 'bg-teal-500/15 text-teal-600 border-teal-500/30';
-    if (t === 'Recap') return 'bg-zinc-500/15 text-zinc-500 border-zinc-500/30';
-    return 'bg-primary/15 text-primary border-primary/30';
-  };
-
-  return (
-    <section className="bg-surface border border-border rounded-2xl overflow-hidden">
-      <header className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
-        <h3 className="text-[14px] font-black uppercase tracking-[0.18em] text-text flex items-center gap-2.5">
-          <span className="w-1.5 h-5 rounded-full bg-primary" />
-          Daftar Series
-          <span className="ml-1 inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-full bg-primary/15 text-primary text-[11px] font-black normal-case tracking-normal border border-primary/25">
-            {items.length}
-          </span>
-        </h3>
-        <span className="text-[11px] text-text-muted font-bold uppercase tracking-wider">
-          Urut · Tahun
-        </span>
-      </header>
-      <div className="flex flex-col divide-y divide-border max-h-[480px] overflow-y-auto no-scrollbar">
-        {items.map((it) => {
-          const isCurrent = it.id === currentId;
-          return (
-            <button
-              key={`${it.source}-${it.id}`}
-              type="button"
-              onClick={() => {
-                if (isCurrent) return;
-                const src = it.source;
-                const id = (it.sourceIds && it.sourceIds[src]) || it.id;
-                const qs = src && src !== 'otakudesu' ? `?source=${src}` : '';
-                navigate(`/video/${id}${qs}`);
-              }}
-              className={`group flex items-center gap-3 px-3 py-2.5 text-left transition ${
-                isCurrent
-                  ? 'bg-primary/8 border-l-4 border-primary cursor-default'
-                  : 'hover:bg-surface-highlight border-l-4 border-transparent'
-              }`}
-            >
-              <div className="relative w-12 h-16 rounded-lg overflow-hidden bg-surface-highlight border border-border shrink-0">
-                {it.poster ? (
-                  <img
-                    src={it.poster}
-                    alt={it.title}
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      const fb = `https://placehold.co/60x80/18181b/c68a4e?text=${encodeURIComponent((it.title || '?').slice(0,2))}`;
-                      if (e.currentTarget.src !== fb) e.currentTarget.src = fb;
-                    }}
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-text-muted font-black text-lg">
-                    {(it.title || '?').slice(0, 1)}
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`text-[13px] font-bold leading-snug line-clamp-2 transition-colors ${
-                  isCurrent ? 'text-primary' : 'text-text group-hover:text-primary'
-                }`}>
-                  {it.title}
-                </p>
-                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  <span className={`inline-flex items-center text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md border ${typePalette(it.type)}`}>
-                    {it.type}
-                  </span>
-                  {it.year && (
-                    <span className="text-[10.5px] font-bold text-text-muted">
-                      {String(it.year).match(/\d{4}/)?.[0] || it.year}
-                    </span>
-                  )}
-                  {isCurrent && (
-                    <span className="inline-flex items-center text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-primary text-white">
-                      Saat ini
-                    </span>
-                  )}
-                </div>
-              </div>
-              {!isCurrent && (
-                <ChevronRight size={14} className="text-text-muted shrink-0" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
+  if (resolved.startsWith('/')) {
+    return SERVER_BASE + resolved;
+  }
+  return resolved;
 }
 
-// Komentar realtime per anime/episode. Subscribe SSE saat mounted supaya
-// post baru / like dari user lain langsung muncul tanpa refresh. State lokal
-// pakai array flat untuk top-level + map untuk replies (mirror struktur
-// payload backend yang sudah grouped). Optimistic-friendly: setelah post,
-// SSE broadcast bawa row final, lalu kita merge.
-function CommentSection({ animeId, episode, userId }) {
-  const [comments, setComments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [text, setText] = useState('');
-  const [posting, setPosting] = useState(false);
-  const [replyTarget, setReplyTarget] = useState(null); // top-level comment id
-  const [likedIds, setLikedIds] = useState(() => new Set());
-  const [error, setError] = useState(null);
-  const seenRef = useRef(new Set()); // dedup id supaya SSE tidak double-insert
-
-  // Load awal + subscribe realtime tiap ganti anime / episode.
-  useEffect(() => {
-    if (!animeId) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    seenRef.current = new Set();
-    listComments(animeId, { episode })
-      .then((rows) => {
-        if (cancelled) return;
-        rows.forEach((c) => seenRef.current.add(c.id));
-        setComments(rows);
-      })
-      .catch((e) => !cancelled && setError(e?.message || 'Gagal memuat komentar'))
-      .finally(() => !cancelled && setLoading(false));
-
-    const unsubscribe = subscribeCommentsSSE(animeId, episode, (ev) => {
-      if (!ev || cancelled) return;
-      if (ev.type === 'new' && ev.comment) {
-        const c = ev.comment;
-        if (seenRef.current.has(c.id)) return;
-        seenRef.current.add(c.id);
-        setComments((prev) => {
-          if (c.parent_id) {
-            // sisipkan ke replies dari parent
-            return prev.map((p) => (p.id === c.parent_id ? { ...p, replies: [...(p.replies || []), c] } : p));
-          }
-          return [{ ...c, replies: [] }, ...prev];
-        });
-      } else if (ev.type === 'like' && ev.commentId != null) {
-        setComments((prev) => prev.map((p) => {
-          if (p.id === ev.commentId) return { ...p, likes: ev.likes };
-          if (p.replies?.length) {
-            return { ...p, replies: p.replies.map((r) => (r.id === ev.commentId ? { ...r, likes: ev.likes } : r)) };
-          }
-          return p;
-        }));
-      } else if (ev.type === 'delete' && ev.commentId != null) {
-        setComments((prev) => prev
-          .filter((p) => p.id !== ev.commentId)
-          .map((p) => p.replies?.length ? { ...p, replies: p.replies.filter((r) => r.id !== ev.commentId) } : p)
-        );
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, [animeId, episode]);
-
-  const handlePost = async () => {
-    const body = text.trim();
-    if (!body || posting) return;
-    if (!userId) {
-      setError('Login dulu untuk berkomentar.');
-      return;
-    }
-    setPosting(true);
-    setError(null);
-    try {
-      await createComment({ userId, animeId, episode, parentId: replyTarget, body });
-      // Tunggu SSE menyusun row final supaya konsisten dengan user lain.
-      setText('');
-      setReplyTarget(null);
-    } catch (e) {
-      setError(e?.message || 'Gagal mengirim komentar');
-    } finally {
-      setPosting(false);
-    }
-  };
-
-  const handleLike = async (commentId) => {
-    if (!userId) {
-      setError('Login dulu untuk like komentar.');
-      return;
-    }
-    // Optimistic toggle locally; SSE akan sync ke nilai final.
-    setLikedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(commentId)) next.delete(commentId); else next.add(commentId);
-      return next;
-    });
-    try { await likeComment(commentId, userId); } catch { /* SSE akan rekonsiliasi */ }
-  };
-
-  const handleDelete = async (commentId) => {
-    if (!userId) return;
-    if (!window.confirm('Hapus komentar ini?')) return;
-    try { await deleteComment(commentId, userId); } catch (e) { setError(e?.message || 'Gagal menghapus'); }
-  };
-
-  const total = comments.reduce((acc, c) => acc + 1 + (c.replies?.length || 0), 0);
-
-  return (
-    <section className="border-t border-border pt-6 mt-6" data-testid="comments-section">
-      <div className="flex items-center gap-2.5 mb-5">
-        <span className="w-1.5 h-5 rounded-full bg-primary" />
-        <h2 className="text-[15px] font-black uppercase tracking-[0.18em] text-text flex items-center gap-2">
-          <MessageCircle size={16} /> Komentar
-          <span className="text-[11px] text-text-muted normal-case tracking-normal font-bold">· {total}</span>
-        </h2>
-      </div>
-
-      <div className="bg-surface border border-border rounded-2xl p-3 mb-5">
-        {replyTarget && (
-          <div className="flex items-center gap-2 text-[11px] text-text-muted mb-2">
-            <CornerDownRight size={12} /> Membalas komentar
-            <button onClick={() => setReplyTarget(null)} className="ml-auto text-primary font-bold">batal</button>
-          </div>
-        )}
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={userId ? 'Tulis komentar...' : 'Login dulu untuk berkomentar'}
-          disabled={!userId || posting}
-          rows={2}
-          maxLength={2000}
-          className="w-full bg-transparent text-[14px] text-text placeholder:text-text-muted resize-none focus:outline-none disabled:opacity-50"
-        />
-        <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/60">
-          <span className="text-[10px] text-text-muted font-semibold">{text.length}/2000</span>
-          <button
-            onClick={handlePost}
-            disabled={!text.trim() || !userId || posting}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-primary text-white text-[12px] font-bold disabled:opacity-40 active:scale-95 transition"
-          >
-            <Send size={13} /> Kirim
-          </button>
-        </div>
-      </div>
-
-      {error && (
-        <div className="text-[12px] text-red-500 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2 mb-4">{error}</div>
-      )}
-
-      {loading ? (
-        <div className="space-y-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="bg-surface border border-border rounded-2xl p-4 animate-pulse h-20" />
-          ))}
-        </div>
-      ) : comments.length === 0 ? (
-        <div className="text-center text-[13px] text-text-secondary py-8 bg-surface-highlight rounded-2xl border border-border">
-          Belum ada komentar. Jadilah yang pertama.
-        </div>
-      ) : (
-        <ul className="space-y-3">
-          {comments.map((c) => (
-            <li key={c.id} className="bg-surface border border-border rounded-2xl p-4">
-              <CommentRow
-                comment={c}
-                userId={userId}
-                liked={likedIds.has(c.id)}
-                onLike={() => handleLike(c.id)}
-                onReply={() => setReplyTarget(c.id)}
-                onDelete={() => handleDelete(c.id)}
-              />
-              {c.replies?.length > 0 && (
-                <ul className="mt-3 pl-4 border-l-2 border-border space-y-3">
-                  {c.replies.map((r) => (
-                    <li key={r.id} className="pt-1">
-                      <CommentRow
-                        comment={r}
-                        userId={userId}
-                        liked={likedIds.has(r.id)}
-                        onLike={() => handleLike(r.id)}
-                        onReply={() => setReplyTarget(c.id)}
-                        onDelete={() => handleDelete(r.id)}
-                        isReply
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
+async function scraperResolve(title, epNumber) {
+  try {
+    const s = await api('/kuramanime/search?q=' + encodeURIComponent(title));
+    const list = s?.animeList || (Array.isArray(s) ? s : []);
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const tn = norm(title);
+    const chosen = list.find(a => norm(a.title) === tn)
+      || list.find(a => norm(a.title).includes(tn) || tn.includes(norm(a.title)))
+      || list[0];
+    const animeId = chosen?.animeId;
+    if (!animeId) return null;
+    const d = await api('/kuramanime/anime/' + animeId);
+    const eps = d?.details?.episodeList || d?.episodeList || [];
+    const ep = (Array.isArray(eps) && eps.find(e => {
+      const m = String(e.episodeId || '').match(/episode\/(\d+)/);
+      return m && parseInt(m[1]) === epNumber;
+    })) || (Array.isArray(eps) ? eps[0] : null);
+    if (!ep?.episodeId) return null;
+    const ed = await api('/kuramanime/episode/' + ep.episodeId);
+    const servers = ed?.details?.serverList || ed?.serverList || [];
+    const srv = (Array.isArray(servers) && servers.find(x => /kuramadrive/i.test(x.label || ''))) || (Array.isArray(servers) ? servers[0] : null);
+    if (!srv?.serverId) return null;
+    const rs = await api('/kuramanime/resolve-stream?serverId=' + encodeURIComponent(srv.serverId));
+    const mp4 = rs?.url || rs?.data?.url;
+    if (!mp4) return null;
+    return '/api/kuramanime/stream-proxy?url=' + encodeURIComponent(mp4);
+  } catch { return null; }
 }
 
-function CommentRow({ comment, userId, liked, onLike, onReply, onDelete, isReply }) {
-  const own = userId && comment.user_id === userId;
-  const name = comment.user_name || comment.user_id || 'anon';
-  const initial = String(name).trim().charAt(0).toUpperCase() || '?';
-  const time = comment.created_at ? new Date(comment.created_at.replace(' ', 'T') + 'Z') : null;
-  const timeLabel = time && !isNaN(time.getTime()) ? time.toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) : '';
-  return (
-    <div className="flex gap-3">
-      {comment.user_picture ? (
-        <img src={comment.user_picture} alt="" className={`shrink-0 rounded-full object-cover ${isReply ? 'w-7 h-7' : 'w-9 h-9'}`} />
-      ) : (
-        <div className={`shrink-0 rounded-full bg-primary/15 text-primary flex items-center justify-center font-black ${isReply ? 'w-7 h-7 text-[11px]' : 'w-9 h-9 text-[13px]'}`}>
-          {initial}
-        </div>
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[13px] font-bold text-text truncate max-w-[160px]">{name}</span>
-          {comment.episode && <span className="text-[10px] uppercase tracking-wider bg-surface-highlight border border-border rounded-full px-2 py-0.5 text-text-muted font-bold">Ep {comment.episode}</span>}
-          <span className="text-[11px] text-text-muted">{timeLabel}</span>
-        </div>
-        <p className="text-[13.5px] text-text leading-relaxed whitespace-pre-wrap break-words mt-1">{comment.body}</p>
-        <div className="flex items-center gap-3 mt-2">
-          <button
-            onClick={onLike}
-            className={`inline-flex items-center gap-1 text-[11px] font-bold transition active:scale-95 ${liked ? 'text-primary' : 'text-text-muted hover:text-text'}`}
-          >
-            <ThumbsUp size={12} /> {comment.likes || 0}
-          </button>
-          {!isReply && (
-            <button onClick={onReply} className="text-[11px] font-bold text-text-muted hover:text-text">Balas</button>
-          )}
-          {own && (
-            <button onClick={onDelete} className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-text-muted hover:text-red-500">
-              <Trash2 size={12} /> Hapus
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function VideoPlayer() {
+export default function VideoPlayerPage() {
   const navigate = useNavigate();
   const params = useParams();
-  const id = params['*']; 
-  
-  const [sourcesCache, setSourcesCache] = useState({
-    otakudesu: null,
-    kuramanime: null
-  });
   const [searchParams] = useSearchParams();
-  const initialSource = searchParams.get('source') || 'otakudesu';
-  const [activeSource, setActiveSource] = useState(initialSource);
-  const [sourceIds, setSourceIds] = useState({
-    otakudesu: initialSource === 'otakudesu' ? id : null,
-    kuramanime: initialSource === 'kuramanime' ? id : null
-  });
-  
+  const id = params["*"];
+  const startAt = parseInt(searchParams.get("t") || "0") || 0;
+  const toastCtx = useToast();
+  const toast = typeof toastCtx?.toast === 'function' ? toastCtx.toast : (() => {});
+
   const [anime, setAnime] = useState(null);
-  const [currentEpisode, setCurrentEpisode] = useState(null);
-
-  // Player state
-  const playerRef = useRef(null);
-  const playerContainerRef = useRef(null);
-  const initialTimeRef = useRef(parseInt(searchParams.get('t') || '0'));
-  const [isLocked, setIsLocked] = useState(false);
-  const [showResolutionMenu, setShowResolutionMenu] = useState(false);
-  const lastTapRef = useRef(0);
-  const singleTapTimeoutRef = useRef(null);
-  const [playing, setPlaying] = useState(false);
-  const [played, setPlayed] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [videoError, setVideoError] = useState(null);
-  const [seeking, setSeeking] = useState(false);
-  const [showControls, setShowControls] = useState(true);
-
-  // Gesture: swipe vertikal sisi KANAN = volume, sisi KIRI = kecerahan.
-  // brightness disimulasikan dengan overlay hitam transparan di atas video
-  // (1 = normal, 0.2 = paling gelap). volume mengikuti elemen <video>.
-  // Toggle bisa di-disable user via Settings → Pengaturan Video Player.
-  const [brightness, setBrightness] = useState(1);
-  const [volumeLevel, setVolumeLevel] = useState(1);
-  const [gestureHint, setGestureHint] = useState(null);
-  const gestureRef = useRef({ active: false, side: null, startY: 0, startVal: 0 });
-  const gestureHintTimeoutRef = useRef(null);
-  const [volumeSwipeEnabled, setVolumeSwipeEnabled] = useState(() => getPreference('volumeSwipe'));
-  const [brightnessSwipeEnabled, setBrightnessSwipeEnabled] = useState(() => getPreference('brightnessSwipe'));
-  const [fullscreenProgressEnabled, setFullscreenProgressEnabled] = useState(() => getPreference('fullscreenProgress'));
+  const [currentEp, setCurrentEp] = useState(null);
+  const [episodes, setEpisodes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [batchQueue, setBatchQueue] = useState([]);
+  const [bm, setBm] = useState(false);
+  const [fav, setFav] = useState(false);
+  const [wl, setWl] = useState(null);
+  const [scraperQualities, setScraperQualities] = useState({});
+  const downloads = useDownloads();
+  const epGridRef = useRef(null);
 
   useEffect(() => {
-    const unsubs = [
-      subscribePreference('volumeSwipe', setVolumeSwipeEnabled),
-      subscribePreference('brightnessSwipe', setBrightnessSwipeEnabled),
-      subscribePreference('fullscreenProgress', setFullscreenProgressEnabled),
-    ];
-    return () => unsubs.forEach((u) => u && u());
-  }, []);
-  
-  // Custom API states
-  const [streamUrl, setStreamUrl] = useState('');
-  const [isVideoLoading, setIsVideoLoading] = useState(false);
-  const [episodeDetails, setEpisodeDetails] = useState(null);
-  const [activeResolution, setActiveResolution] = useState('720p');
-  const [activeServerId, setActiveServerId] = useState(null); 
-  const [showDownloadModal, setShowDownloadModal] = useState(false);
-  // Download BATCH (full series) — terpisah dari download per-episode.
-  // batchOptions: null = belum fetch, [] = tidak tersedia, [items] = sudah dapat.
-  const [showBatchModal, setShowBatchModal] = useState(false);
-  const [batchOptions, setBatchOptions] = useState(null);
-  const [batchLoading, setBatchLoading] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [downloadStartedToast, setDownloadStartedToast] = useState(null);
-  
-  // Action states
-  const [isBookmarked, setIsBookmarked] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  
-  // Advanced Features states
-  const [hasStartedPlaying, setHasStartedPlaying] = useState(searchParams.get('play') === 'true');
-  const [introSkipped, setIntroSkipped] = useState(false);
-  const [outroSkipped, setOutroSkipped] = useState(false);
-  const [showEpisodeOverlay, setShowEpisodeOverlay] = useState(false);
-  // Tab di bawah player ala nanimeid: 'info' atau 'comments'.
-  const [playerTab, setPlayerTab] = useState('info');
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [reportText, setReportText] = useState('');
-
-  // Auto-open download modal saat URL punya ?download=1 (unduh episode aktif)
-  // atau ?batch=1 (unduh batch / full series). Dibuka SETELAH episodeDetails
-  // siap supaya daftar resolusi langsung muncul.
-  useEffect(() => {
-    if (!anime || !currentEpisode) return;
-    if (searchParams.get('download') === '1' && episodeDetails) {
-      setShowDownloadModal(true);
-    }
-    if (searchParams.get('batch') === '1') {
-      handleDownloadBatch();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, currentEpisode, episodeDetails]);
-
-  // Detail View Config States
-  const [episodeLayout, setEpisodeLayout] = useState('horizontal'); // 'horizontal' or 'vertical'
-  const [episodeSort, setEpisodeSort] = useState('asc'); // 'asc' or 'desc'
-  const [episodeSearch, setEpisodeSearch] = useState('');
-  const [skipIntroDismissed, setSkipIntroDismissed] = useState(false);
-  const [isVideoBookmarked, setIsVideoBookmarked] = useState(false);
-  const [isLiked, setIsLiked] = useState(false);
-  
-  const controlsTimeoutRef = useRef(null);
-  const lastSavedTimeRef = useRef(0);
-
-  const showToast = (msg) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 3000);
-  };
-
-  const resetControlsTimeout = () => {
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = setTimeout(() => {
-      setShowControls(false);
-      setShowResolutionMenu(false);
-      setShowSpeedMenu(false);
-    }, 3000);
-  };
-
-  const triggerControlsVisibility = () => {
-    setShowControls(prev => {
-      const next = !prev;
-      if (next) {
-        resetControlsTimeout();
-      } else {
-        if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-      }
-      return next;
-    });
-  };
-
-  const handleMouseMove = () => {
-    if (isLocked) return;
-    setShowControls(true);
-    resetControlsTimeout();
-  };
-
-  const saveCurrentProgress = async (timeToSave) => {
-    if (!anime || !currentEpisode || !hasStartedPlaying) return;
-    const userId = getCurrentUserId();
-
-    lastSavedTimeRef.current = timeToSave;
-    await saveHistory(userId, {
-      id: anime.id,
-      title: anime.title,
-      poster: anime.poster || "",
-      episode: currentEpisode.number || (currentEpisode.title?.match(/\d+/) || ['1'])[0],
-      source: activeSource,
-      progressSeconds: Math.floor(timeToSave),
-      durationSeconds: Math.floor(duration || 0),
-    });
-  };
-
-  const togglePlay = () => {
-    if (isLocked) return;
-    if (playerRef.current) {
-      if (playing) {
-        playerRef.current.pause();
-        saveCurrentProgress(playerRef.current.currentTime);
-      } else {
-        playerRef.current.play().catch(e => console.warn("Play error:", e));
-      }
-    }
-  };
-
-  const playNextEpisode = () => {
-    if (!anime || !currentEpisode) return;
-    const currentIndex = anime.episodes.findIndex(ep => ep.id === currentEpisode.id);
-    if (currentIndex !== -1 && currentIndex < anime.episodes.length - 1) {
-      const nextEp = anime.episodes[currentIndex + 1];
-      setCurrentEpisode(nextEp);
-      showToast(`Memutar ${formatEpisodeTitle(nextEp.title, anime?.title)}`);
-    } else {
-      showToast("Ini adalah episode terakhir.");
-    }
-  };
-
-  const playPrevEpisode = () => {
-    if (!anime || !currentEpisode) return;
-    const currentIndex = anime.episodes.findIndex(ep => ep.id === currentEpisode.id);
-    if (currentIndex > 0) {
-      const prevEp = anime.episodes[currentIndex - 1];
-      setCurrentEpisode(prevEp);
-      showToast(`Memutar ${formatEpisodeTitle(prevEp.title, anime?.title)}`);
-    } else {
-      showToast("Ini adalah episode pertama.");
-    }
-  };
-
-  const hasNextEpisode = () => {
-    if (!anime || !currentEpisode) return false;
-    const currentIndex = anime.episodes.findIndex(ep => ep.id === currentEpisode.id);
-    return currentIndex !== -1 && currentIndex < anime.episodes.length - 1;
-  };
-
-  const hasPrevEpisode = () => {
-    if (!anime || !currentEpisode) return false;
-    const currentIndex = anime.episodes.findIndex(ep => ep.id === currentEpisode.id);
-    return currentIndex > 0;
-  };
-
-  const [currentTime, setCurrentTime] = useState(0);
-
-  const handleProgress = (state) => {
-    if (!seeking && playerRef.current) {
-      setPlayed(state.played);
-      const currTime = playerRef.current.currentTime;
-      setCurrentTime(currTime);
-
-      // Save throttled progress (every 5 seconds)
-      if (Math.abs(currTime - lastSavedTimeRef.current) >= 5) {
-        saveCurrentProgress(currTime);
-      }
-
-      // Fitur auto-skip intro dihapus sesuai permintaan: dulu skip otomatis
-      // ke detik ke-90 saat OP standar 1m30s. Sekarang user mengontrol seek
-      // sendiri lewat tombol fast-forward atau timeline.
-
-      // Auto-next fallback: kalau video sudah hampir selesai (1 detik tersisa)
-      // tapi onEnded belum trigger (sering terjadi di HLS/proxy stream),
-      // trigger handler manual.
-      if (duration > 0 && currTime >= duration - 0.5 && !introSkipped && hasStartedPlaying) {
-        // pakai introSkipped sebagai mark generic untuk hindari double-trigger
-        // dalam frame yang sama; flag asli akan di-reset di episode change effect.
-      }
-      // CATATAN: jangan auto-pindah episode di sini. Auto-next harus tunggu
-      // sampai detik terakhir (handler onEnded). Mem-skip outro lebih awal
-      // membuat episode terganti sebelum credit selesai.
-    }
-  };
-
-  const handleSeekChange = (e) => {
-    const newPlayed = parseFloat(e.target.value);
-    setPlayed(newPlayed);
-    if (playerRef.current && duration > 0) {
-      setCurrentTime(newPlayed * duration);
-    }
-  };
-
-  const handleSeekMouseUp = (e) => {
-    setSeeking(false);
-    const newPlayed = parseFloat(e.target.value);
-    if (playerRef.current && duration > 0) {
-      playerRef.current.currentTime = newPlayed * duration;
-      saveCurrentProgress(newPlayed * duration);
-    }
-  };
-
-  const handleVideoEnd = () => {
-    setPlaying(false);
-    // Auto next aktif secara default. Dipicu HANYA oleh native `onEnded`
-    // <video>, jadi pasti menunggu sampai detik paling terakhir baru
-    // berganti episode (bukan lebih cepat dari itu).
-    const autoNextSetting = getPreference('autoNext');
-    if (autoNextSetting && hasNextEpisode()) {
-      playNextEpisode();
-    } else {
-      showToast("Episode selesai.");
-    }
-  };
-
-  const showGestureHint = (type, value) => {
-    setGestureHint({ type, value });
-    if (gestureHintTimeoutRef.current) clearTimeout(gestureHintTimeoutRef.current);
-    gestureHintTimeoutRef.current = setTimeout(() => setGestureHint(null), 800);
-  };
-
-  const handleTouchStart = (e) => {
-    if (isLocked || !e.touches || e.touches.length !== 1) return;
-    // Hormati toggle pengaturan: jika kedua gestur dinonaktifkan, jangan
-    // mulai sesi gestur (biar tap & double-tap tetap berfungsi normal).
-    if (!volumeSwipeEnabled && !brightnessSwipeEnabled) return;
-    const touch = e.touches[0];
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const rawSide = x < rect.width / 2 ? 'brightness' : 'volume';
-    // Jika sisi yang diminta sedang di-disable, batalkan.
-    if (rawSide === 'volume' && !volumeSwipeEnabled) return;
-    if (rawSide === 'brightness' && !brightnessSwipeEnabled) return;
-    gestureRef.current = {
-      active: true,
-      side: rawSide,
-      startY: touch.clientY,
-      startVal: rawSide === 'volume' ? volumeLevel : brightness,
-      height: rect.height,
-    };
-  };
-
-  const handleTouchMove = (e) => {
-    const g = gestureRef.current;
-    if (!g.active || isLocked || !e.touches || e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const deltaY = g.startY - touch.clientY; // ke atas = positif
-    const change = deltaY / (g.height || 300);
-    if (Math.abs(deltaY) < 6) return; // abaikan getaran kecil agar tap tetap jalan
-    const next = Math.min(1, Math.max(0, g.startVal + change));
-    if (g.side === 'volume') {
-      setVolumeLevel(next);
-      if (playerRef.current) {
-        playerRef.current.volume = next;
-        playerRef.current.muted = next === 0;
-      }
-      showGestureHint('volume', next);
-    } else {
-      const b = Math.max(0.2, next);
-      setBrightness(b);
-      showGestureHint('brightness', b);
-    }
-  };
-
-  const handleTouchEnd = () => {
-    gestureRef.current = { active: false, side: null, startY: 0, startVal: 0 };
-  };
-
-  const handlePlayerClick = (e) => {
-    if (isLocked) {
-      triggerControlsVisibility();
-      return;
-    }
-    
-    const now = Date.now();
-    const DOUBLE_PRESS_DELAY = 300;
-    if (now - lastTapRef.current < DOUBLE_PRESS_DELAY) {
-      if (singleTapTimeoutRef.current) clearTimeout(singleTapTimeoutRef.current);
-      
-      const rect = e.currentTarget.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const width = rect.width;
-      
-      if (playerRef.current) {
-        if (x < width / 2) {
-          playerRef.current.currentTime = Math.max(0, playerRef.current.currentTime - 10);
-          showToast("-10 Detik");
-        } else {
-          playerRef.current.currentTime = Math.min(duration, playerRef.current.currentTime + 10);
-          showToast("+10 Detik");
-        }
-      }
-    } else {
-      lastTapRef.current = now;
-      singleTapTimeoutRef.current = setTimeout(() => {
-        triggerControlsVisibility();
-      }, DOUBLE_PRESS_DELAY);
-    }
-  };
+    const el = epGridRef.current;
+    if (!el) return;
+    const btn = el.querySelector(`[data-ep="${currentEp?.number}"]`);
+    if (btn) btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [currentEp?.number, episodes.length]);
 
   useEffect(() => {
-    if (playing) {
-      resetControlsTimeout();
-    } else {
-      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-      setShowControls(true);
-    }
-    return () => {
-      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-      if (singleTapTimeoutRef.current) clearTimeout(singleTapTimeoutRef.current);
-      if (gestureHintTimeoutRef.current) clearTimeout(gestureHintTimeoutRef.current);
-    };
-  }, [playing]);
+    if (!id) return;
+    setLoading(true);
+    const batchParam = searchParams.get("batch");
+    if (batchParam) {
+      const nums = batchParam.split(",").map(Number).filter(n => !isNaN(n));
+      setBatchQueue(nums);
+    } else setBatchQueue([]);
 
-  const getIframeUrl = () => {
-    if (!streamUrl) return '';
-    if (activeSource === 'kuramanime') {
-      return `${API_BASE_URL}/kuramanime/iframe-proxy?url=${encodeURIComponent(streamUrl)}`;
-    }
-    if (activeSource === 'nekopoi') {
-      // Pendekatan baru: load embed URL Nekopoi (playmogo/streampoi/vidnest)
-      // langsung di iframe TANPA lewat backend iframe-proxy. Alasan:
-      //
-      // 1. Server backend kena 403 saat fetch playmogo/streampoi karena IP
-      //    VPS-nya di-block sumber upstream. Sehingga proxy server-side
-      //    selalu menghasilkan halaman error.
-      // 2. Android WebView punya User-Agent browser asli + IP rumah user, jadi
-      //    sumber upstream tidak block; embed video play normal.
-      // 3. Player bawaan embed (playmogo/streampoi) sudah punya tombol
-      //    fullscreen yang otomatis mendeteksi device — kita tidak perlu
-      //    inject CSS/script tambahan.
-      //
-      // Iframe element di JSX punya `allowFullScreen` + `allow="autoplay;
-      // fullscreen; encrypted-media"` sehingga semua kontrol native
-      // berfungsi langsung.
-      const isDirect = streamUrl.includes('.mp4') || streamUrl.includes('.m3u8') || streamUrl.includes('/proxy/stream') || streamUrl.includes('stream-proxy');
-      if (isDirect) return streamUrl;
-      // Embed URL → langsung. WebView memuat sebagai halaman penuh.
-      return streamUrl;
-    }
-    return streamUrl;
-  };
+    (async () => {
+      let animeData = null;
+      let episodeData = [];
 
-  // Catatan: buildNekopoiStreamUrl tidak dipakai lagi — kita memang sengaja
-  // membiarkan pemain embed bawaan Nekopoi mengurus playback-nya sendiri.
-  // Fungsi dipertahankan agar tidak memecahkan import/usage lama, tapi selalu
-  // mengembalikan string kosong.
-  const buildNekopoiStreamUrl = async () => '';
-
-  // Untuk Otakudesu: SELALU ekstrak halaman embed jadi .m3u8/.mp4
-  // via /extract-stream lalu salurkan lewat stream-proxy supaya player
-  // kustom (HTML5 <video>) yang memutar — bukan iframe. User minta player
-  // kustom wajib untuk Otakudesu. Timeout dinaikkan ke 25s supaya extract
-  // punya cukup waktu (Puppeteer cold-start 10-20s).
-  //
-  // Untuk Kuramanime: SENGAJA TIDAK lewat /extract-stream. Endpoint itu pakai
-  // Puppeteer untuk membuka halaman embed dan menunggu video src muncul, yang
-  // di VPS bisa makan 30-90 detik (bahkan timeout). Kuramanime selalu
-  // diputar lewat <iframe> ke /kuramanime/iframe-proxy yang sudah di-cache
-  // Resolve embed URL ke direct stream (mp4/m3u8) via backend.
-  // - Kurama/Nekopoi default-nya iframe-friendly tetapi player kustom
-  //   butuh URL direct. Selama URL belum berakhiran .mp4/.m3u8 dan belum
-  //   melalui proxy, lewat /extract-stream agar di-puppeteer-extract.
-  // - Output di-cache server-side sehingga panggilan kedua untuk URL yang
-  //   sama < 1 detik.
-  const resolveEmbedToStream = async (url, source) => {
-    if (!url) return url;
-    const isDirect = url.includes('.mp4') || url.includes('.m3u8') || url.includes('stream-proxy') || url.includes('/proxy/stream');
-    if (isDirect) return url;
-    if (!url.startsWith('http')) return url;
-    // Nekopoi tetap pakai iframe path (sumber khusus).
-    if (source === 'nekopoi') return url;
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 25000);
-      const res = await fetch(`${API_BASE_URL}/extract-stream?url=${encodeURIComponent(url)}`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (res.ok) {
-        const json = await res.json();
-        const direct = json?.streamUrl;
-        if (direct && (direct.includes('.mp4') || direct.includes('.m3u8'))) {
-          const proxyBase = `${API_BASE_URL}/proxy/stream?url=`;
-          return `${proxyBase}${encodeURIComponent(direct)}`;
-        }
-      }
-    } catch (e) {
-      console.warn('resolveEmbedToStream gagal, pakai URL asli', e);
-    }
-    // Fallback Kurama: lewat stream-proxy supaya Referer/CORS sudah ter-set
-    // (player kustom HTML5 <video> butuh same-origin atau CORS header).
-    if (source === 'kuramanime') {
-      return `${API_BASE_URL}/kuramanime/stream-proxy?url=${encodeURIComponent(url)}`;
-    }
-    return url;
-  };
-
-  // 1. Initial Load of Metadata for default source
-  useEffect(() => {
-    const loadInitialAnime = async () => {
-      setAnime(null);
-      setCurrentEpisode(null);
-      setStreamUrl("");
-      setIsVideoLoading(true);
-      setVideoError(null);
-
-      if (id) {
-        let fetchId = id;
-        try {
-          const data = await fetchSourceAnimeDetails(activeSource, fetchId);
-
-          // Auto-fallback ke Kuramanime kalau:
-          //   - Otakudesu return null (anime tidak ada di sumber)
-          //   - Atau episode list kosong (sering terjadi pada anime baru
-          //     seperti "Super no Ura de Yani Suu Futari", "Yuru Camp Movie")
-          // Kondisi ini sebelumnya membuat user lihat "video tidak tersedia"
-          // padahal anime-nya ada di Kurama dengan ID berbeda.
-          const otakuEmpty = !data || ((data.episodeList || data.episodes || []).length === 0);
-          if (activeSource === 'otakudesu' && otakuEmpty) {
-            try {
-              // Pakai title dari URL slug sebagai kueri search.
-              const slug = String(fetchId).replace(/-+/g, ' ').replace(/\b(sub indo|episode \d+|batch)\b/gi, '').trim();
-              if (slug.length >= 3) {
-                // Multi-query fallback: full slug, slug tanpa suffix
-                // movie/special/ova/oad/recap, dan slug tanpa suffix season.
-                // Tujuan: kalau Kurama tidak punya match untuk "yuru camp movie",
-                // coba "yuru camp" lalu filter result ke seasonKey movie.
-                const queries = [slug];
-                const stripVariant = slug.replace(/\b(movie|gekijouban|special|sp|ova|oad|recap)\b/gi, '').replace(/\s+/g, ' ').trim();
-                if (stripVariant && stripVariant !== slug) queries.push(stripVariant);
-                const stripSeason = stripVariant.replace(/\b(season|s)\s*\d+\b/gi, '').replace(/\s+/g, ' ').trim();
-                if (stripSeason && !queries.includes(stripSeason)) queries.push(stripSeason);
-
-                const wantSeason = seasonKey(slug);
-
-                let best = null;
-                let bestScore = 0;
-                for (const q of queries) {
-                  let res, json;
-                  try {
-                    res = await fetch(`${API_BASE_URL}/kuramanime/search?q=${encodeURIComponent(q)}`);
-                    json = await res.json();
-                  } catch { continue; }
-                  const list = json?.data?.animeList || [];
-                  if (!Array.isArray(list) || list.length === 0) continue;
-
-                  // Filter 1: pilih item dengan seasonKey yang sama dulu.
-                  // Untuk movie/special/ova/oad — STRICT (jangan jatuh ke TV).
-                  const strict = wantSeason !== '1';
-                  let pool = list.filter((it) => seasonKey(it.title) === wantSeason);
-                  if (pool.length === 0 && !strict) {
-                    pool = list; // untuk wantSeason='1', boleh pakai semua
-                  }
-                  if (pool.length === 0) continue;
-
-                  for (const it of pool) {
-                    const sim = titleSimilarity(slug, it.title || '');
-                    // Bonus skor kalau seasonKey persis cocok.
-                    const bonus = seasonKey(it.title) === wantSeason ? 0.2 : 0;
-                    const score = sim + bonus;
-                    if (score > bestScore) {
-                      bestScore = score;
-                      best = it;
-                    }
-                  }
-                  if (best && bestScore >= 0.5) break;
-                }
-
-                if (best?.animeId) {
-                  setSourceIds(prev => ({ ...prev, kuramanime: best.animeId }));
-                  switchSource('kuramanime', best.animeId);
-                  return;
-                }
-              }
-            } catch (e) {
-              console.warn('Auto-fallback Kuramanime gagal:', e);
-            }
-          }
-
-          if (data) {
-            let parsedSynopsis = "";
-            if (data.synopsis && data.synopsis.paragraphList) {
-              parsedSynopsis = data.synopsis.paragraphList.join("\n\n");
-            } else if (typeof data.synopsis === "string") {
-              parsedSynopsis = data.synopsis;
-            }
-
-            const formattedAnime = {
-              id: fetchId,
-              title: data.title,
-              poster: data.poster || data.thumbnail || data.image || "",
-              synopsis: parsedSynopsis,
-              rating: data.score || 8.5,
-              year: data.aired || data.releaseDate || "2026",
-              status: data.status || "Ongoing",
-              genreList: data.genreList || [],
-              // batch (Otakudesu): {batchId, title, otakudesuUrl}. Frontend pakai
-              // ini untuk fetch /otakudesu/batch/:batchId saat user klik UNDUH BATCH.
-              batch: data.batch || null,
-              episodes: (data.episodeList || data.episodes || []).length > 0
-                ? (data.episodeList || data.episodes).map(ep => ({
-                    id: ep.episodeId || ep.id,
-                    number: extractEpisodeNumber(ep),
-                    title: ep.title,
-                  }))
-                : [{ id: fetchId, number: "1", title: data.title }]
-            };
-
-            if (formattedAnime.episodes.length > 1) {
-              const firstNum = parseInt(formattedAnime.episodes[0].number || "1");
-              const lastNum = parseInt(formattedAnime.episodes[formattedAnime.episodes.length - 1].number || "2");
-              if (firstNum > lastNum) {
-                 formattedAnime.episodes.reverse();
-              }
-            }
-            
-            setSourcesCache(prev => ({ ...prev, [activeSource]: formattedAnime }));
-            setAnime(formattedAnime);
-            
-            if (formattedAnime.episodes.length > 0) {
-              let selectedEp = formattedAnime.episodes[0];
-              const initEpId = searchParams.get('epId');
-              if (initEpId) {
-                 const found = formattedAnime.episodes.find(ep => ep.id === initEpId);
-                 if (found) selectedEp = found;
-              }
-              setCurrentEpisode(selectedEp);
-            }
-
-            resolveAlternativeSources(data.title);
-          } else {
-            setVideoError(`Gagal mengambil detail anime dari sumber ${activeSource}. Silakan pilih sumber lain.`);
-          }
-        } catch (e) {
-          console.error("loadInitialAnime error:", e);
-          setVideoError("Terjadi kesalahan koneksi atau server error.");
-        }
-      }
-    };
-    loadInitialAnime();
-  }, [id]);
-
-  // Token-based similarity (Jaccard) on lowercased word sets, ditambah bonus
-  // bila nomor season cocok. Lebih tahan terhadap permutasi kata, suffix
-  // sub indo / ongoing / batch dll dibanding cocokkan substring biasa.
-  const seasonNumberFromTitle = (s = '') => {
-    const t = String(s).toLowerCase();
-    const m = t.match(/season\s*(\d+)|\bs(\d+)\b/);
-    return m ? parseInt(m[1] || m[2], 10) : 1;
-  };
-  const tokenize = (s = '') => String(s)
-    .toLowerCase()
-    .replace(/\(.*?\)/g, ' ')
-    .replace(/sub(title)?\s*(indo(nesia)?)?/g, ' ')
-    .replace(/ongoing|completed|tamat|batch/g, ' ')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length > 1);
-  const scoreMatch = (target, candidate) => {
-    const a = new Set(tokenize(target));
-    const b = new Set(tokenize(candidate));
-    if (a.size === 0 || b.size === 0) return 0;
-    let intersect = 0;
-    a.forEach(t => { if (b.has(t)) intersect += 1; });
-    const union = new Set([...a, ...b]).size;
-    let score = intersect / union;
-    if (seasonNumberFromTitle(target) === seasonNumberFromTitle(candidate)) score += 0.15;
-    return score;
-  };
-
-  const pickBestMatch = (list, targetTitle, neededEpisodes) => {
-    if (!Array.isArray(list) || list.length === 0) return null;
-    const scored = list.map(item => {
-      const t = item.title || '';
-      let score = scoreMatch(targetTitle || '', t);
-      // Hindari kandidat dengan jumlah episode < yang dibutuhkan (mis. season
-      // baru saat user request EP 12 padahal cuma punya 3).
-      const epCount = parseInt(String(item.episodes || item.episodeCount || '0')) || 0;
-      if (neededEpisodes && epCount && epCount < neededEpisodes) score -= 0.3;
-      return { item, score };
-    });
-    scored.sort((a, b) => b.score - a.score);
-    return scored[0].score >= 0.25 ? scored[0].item : null;
-  };
-
-  const switchSource = async (src, forcedId = null, targetEpisodeNumber = null) => {
-    if (src === activeSource) return;
-    let srcId = forcedId || sourceIds[src];
-
-    const currentEpNum = targetEpisodeNumber || currentEpisode?.number || "1";
-
-    if (src !== 'otakudesu' && !srcId) {
       try {
-        setIsVideoLoading(true);
-        showToast(`Mencari anime di ${src}...`);
-        let cleanTitle = (anime?.title || "")
-          .replace(/\(TV\)/gi, "")
-          .replace(/Subtitle Indonesia/gi, "")
-          .replace(/Sub Indo/gi, "")
-          .replace(/\(.*?\)/g, "")
-          .trim();
-        // Cari pakai judul utuh (TANPA hapus "Season X") dulu agar dapat
-        // varian season yang benar; kalau gagal, fallback ke versi pendek.
-        const tryQuery = async (q) => {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000);
-          try {
-            const res = await fetch(`${API_BASE_URL}/${src}/search?q=${encodeURIComponent(q)}`, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            const json = await res.json();
-            return json?.data?.animeList || json?.data || [];
-          } catch (_) {
-            return [];
-          }
-        };
-
-        let list = await tryQuery(cleanTitle);
-        if (!Array.isArray(list) || list.length === 0) {
-          const shortQ = cleanTitle.replace(/\s+Season\s*\d*/gi, "").replace(/\s+S\d+/gi, "").trim();
-          if (shortQ && shortQ !== cleanTitle) list = await tryQuery(shortQ);
-        }
-
-        if (Array.isArray(list) && list.length > 0) {
-          const best = pickBestMatch(list, anime?.title, parseInt(currentEpNum));
-          srcId = (best || list[0]).animeId;
-          setSourceIds(prev => ({ ...prev, [src]: srcId }));
-        }
-      } catch (e) {
-        console.error("Dynamic search fallback failed", e);
-      }
-
-      if (!srcId) {
-        setIsVideoLoading(false);
-        showToast(`Maaf, anime ini tidak ditemukan di sumber ${src}.`);
-        return;
-      }
-    }
-    
-    setActiveSource(src);
-    setIsVideoLoading(true);
-    setStreamUrl("");
-    setEpisodeDetails(null);
-    setCurrentEpisode(null);
-
-    const findMatchingEpisode = (epList) => {
-      if (!epList || epList.length === 0) return null;
-      const matched = epList.find(ep => parseInt(ep.number) === parseInt(currentEpNum));
-      return matched || epList[0];
-    };
-
-    if (sourcesCache[src]) {
-      setAnime(sourcesCache[src]);
-      if (sourcesCache[src].episodes.length > 0) {
-        setCurrentEpisode(findMatchingEpisode(sourcesCache[src].episodes));
-      } else {
-         setIsVideoLoading(false);
-      }
-      return;
-    }
-
-    const data = await fetchSourceAnimeDetails(src, srcId);
-    if (data) {
-      let parsedSynopsis = "";
-      if (data.synopsis && data.synopsis.paragraphList) {
-        parsedSynopsis = data.synopsis.paragraphList.join("\n\n");
-      } else if (typeof data.synopsis === "string") {
-        parsedSynopsis = data.synopsis;
-      }
-      const formattedAnime = {
-        id: srcId,
-        title: data.title,
-        poster: data.poster || data.thumbnail || data.image || "",
-        synopsis: parsedSynopsis || "Tidak ada sinopsis.",
-        rating: data.score || data.rating || "8.5",
-        year: data.aired || data.releaseDate || "2026",
-        status: data.status || "Ongoing",
-        genreList: data.genreList || [],
-        episodes: (data.episodeList || data.episodes || []).length > 0
-          ? (data.episodeList || data.episodes).map(ep => ({
-              id: ep.episodeId || ep.id,
-              number: extractEpisodeNumber(ep),
-              title: ep.title,
-            }))
-          : [{ id: srcId, number: "1", title: data.title }]
-      };
-      
-      if (formattedAnime.episodes.length > 1) {
-        const firstNum = parseInt(formattedAnime.episodes[0].number || "1");
-        const lastNum = parseInt(formattedAnime.episodes[formattedAnime.episodes.length - 1].number || "2");
-        if (firstNum > lastNum) {
-           formattedAnime.episodes.reverse();
-        }
-      }
-
-      setSourcesCache(prev => ({ ...prev, [src]: formattedAnime }));
-      setAnime(formattedAnime);
-      if (formattedAnime.episodes.length > 0) {
-        setCurrentEpisode(findMatchingEpisode(formattedAnime.episodes));
-      }
-    } else {
-       showToast(`Gagal mengambil data dari ${src}.`);
-       setActiveSource('kuramanime');
-       setIsVideoLoading(false);
-       setAnime(sourcesCache['kuramanime']);
-       setCurrentEpisode(sourcesCache['kuramanime']?.episodes[0]);
-    }
-  };
-
-  // Normalize a title for season-aware comparison so "Yuru Camp S1" never matches "Yuru Camp S3".
-  // Key untuk membandingkan apakah dua judul mengacu ke seri yang sama.
-  // Movie/Special/OVA/OAD/Recap diperlakukan sebagai key TERPISAH supaya
-  // "Yuru Camp Movie" tidak salah cocok ke "Yuru Camp" (TV S1), dan
-  // "Isekai Meikyuu de Harem wo Special" tidak ke TV-nya.
-  const seasonKey = (t = "") => {
-    const lower = t.toLowerCase();
-    if (/\bmovie\b|gekijou|gekijouban/.test(lower)) return "movie";
-    if (/\bspecial\b|\bsp\b/.test(lower)) return "special";
-    if (/\bova\b/.test(lower)) return "ova";
-    if (/\boad\b/.test(lower)) return "oad";
-    if (/\brecap\b|\bcompile\b|\bcompilation\b/.test(lower)) return "recap";
-    const m = lower.match(/(?:season\s*|s)(\d+)/);
-    return m ? m[1] : "1"; // default season 1 when unspecified
-  };
-
-  // Hitung kemiripan judul setelah normalisasi (lowercase, buang noise umum
-  // seperti "subtitle indonesia", tanda baca, dll.). Pakai Jaccard atas token
-  // unik supaya "Otonari no Tenshi-sama Episode 5 Sub Indo" cocok dengan
-  // "Otonari no Tenshi-sama". Skor 0..1, lebih besar berarti lebih cocok.
-  const normalizeForCompare = (t = "") => {
-    return String(t)
-      .toLowerCase()
-      .replace(/\(.*?\)/g, " ")
-      .replace(/sub(title)?\s*indo(nesia)?/gi, " ")
-      .replace(/episode\s*\d+/gi, " ")
-      .replace(/\s+s\s*\d+/gi, " ")
-      .replace(/season\s*\d+/gi, " ")
-      .replace(/[^\w\s]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  };
-  const titleSimilarity = (a, b) => {
-    const tokensA = new Set(normalizeForCompare(a).split(" ").filter(Boolean));
-    const tokensB = new Set(normalizeForCompare(b).split(" ").filter(Boolean));
-    if (tokensA.size === 0 || tokensB.size === 0) return 0;
-    let common = 0;
-    tokensA.forEach((tok) => { if (tokensB.has(tok)) common++; });
-    return common / Math.max(tokensA.size, tokensB.size);
-  };
-
-  // Override manual: anime yang harus selalu ambil dari Kuramanime karena
-  // sumber lain (mis. Otakudesu) bermasalah / nomor episode tidak cocok.
-  // - Yuru Camp S1-S3 (TV): ID pasti per season
-  // - Heya Camp + Heya Camp Season 2 (spin-off): force Kuramanime tetapi ID
-  //   akan di-resolve via search Kuramanime karena kami tidak hardcode-nya.
-  const MANUAL_KURAMANIME = (titleRaw) => {
-    const t = (titleRaw || "").toLowerCase().replace(/[△\s]+/g, " ").trim();
-    if (t.includes("yuru camp")) {
-      // Yuru Camp Movie — ID khusus di Kurama (dari /kuramanime/anime/yuru-camp-movie).
-      if (/\bmovie\b/.test(t) || t.includes("gekijou")) return "1570/yuru-camp-movie";
-      const s = seasonKey(titleRaw);
-      if (s === "3") return "2669/yuru-camp-season-3";
-      if (s === "2") return "3601/yuru-camp-season-2";
-      return "3603/yuru-camp"; // Season 1 / default
-    }
-    return null;
-  };
-
-  // Title yang harus PAKAI Kuramanime walaupun ID-nya belum diketahui —
-  // resolveAlternativeSources akan search Kuramanime lalu switch.
-  // Termasuk anime varian (Movie/Special/OVA) yang sumber lain sering
-  // mismatch ke TV-series-nya.
-  const SHOULD_FORCE_KURAMANIME = (titleRaw) => {
-    const t = (titleRaw || "").toLowerCase().replace(/[△\s]+/g, " ").trim();
-    if (t.includes("heya camp")) return true;
-    if (/yuru\s*camp.*\bmovie\b/.test(t)) return true; // Yuru Camp Movie
-    if (/isekai\s*meikyuu.*harem.*\bspecial\b/.test(t)) return true;
-    // Super no Ura de Yani Suu Futari — anime tahun 2026 yang belum ada di
-    // Otakudesu, hanya tersedia di Kurama.
-    if (/super.*ura.*yani.*suu.*futari|yani\s*suu\s*futari/.test(t)) return true;
-    // Generalisasi: tag varian standalone (Special/OVA/OAD) sering hilang
-    // di sumber lain → paksa Kurama agar episode listnya cocok.
-    if (/\b(special|ova|oad|recap)\b/.test(t)) return true;
-    return false;
-  };
-
-  const resolveAlternativeSources = async (title) => {
-    if (activeSource === 'nekopoi') return;
-    // Kalau sudah di Kurama, tidak perlu force-switch lagi — judul saat ini
-    // memang sudah datang dari Kurama. Sebelumnya kita selalu search ulang
-    // dan kadang switch ke result yang tidak cocok (mis. Heya Camp →
-    // berakhir di anime lain karena seasonKey filter terlalu ketat).
-    if (activeSource === 'kuramanime') return;
-
-    // Cek override manual lebih dulu (mis. Yuru Camp S1-S3 + Movie -> Kuramanime).
-    const forcedKuramanimeId = MANUAL_KURAMANIME(title);
-    if (forcedKuramanimeId) {
-      setSourceIds(prev => ({ ...prev, kuramanime: forcedKuramanimeId }));
-      if (activeSource !== 'kuramanime' || sourceIds.kuramanime !== forcedKuramanimeId) {
-        switchSource('kuramanime', forcedKuramanimeId);
-      }
-      return;
-    }
-
-    // Force Kuramanime list (mis. Heya Camp / Yuru Camp Movie / Yani Suu
-    // Futari). Cari di Kurama dengan beberapa variasi query supaya hit-rate
-    // tinggi; kalau ketemu, langsung switch source ke Kurama.
-    if (SHOULD_FORCE_KURAMANIME(title)) {
-      const queries = [];
-      queries.push(title);
-      // Variasi 2: title tanpa suffix Movie/Special/OVA/Recap — sering
-      // judul di Kurama tertulis "Yuru Camp△ Movie" tetapi searching tanpa
-      // "Movie" tetap kembali daftar berisi varian movie.
-      const stripped = title.replace(/\b(movie|gekijouban|special|sp|ova|oad|recap)\b/gi, '').replace(/\s+/g, ' ').trim();
-      if (stripped && stripped.toLowerCase() !== title.toLowerCase()) queries.push(stripped);
-      const wantSeason = seasonKey(title);
-      let best = null;
-      let bestScore = 0;
-      for (const q of queries) {
-        try {
-          const res = await fetch(`${API_BASE_URL}/kuramanime/search?q=${encodeURIComponent(q)}`);
-          const json = await res.json();
-          const list = json?.data?.animeList || [];
-          if (!Array.isArray(list) || list.length === 0) continue;
-          // 1) Cari yang seasonKey-nya cocok (movie ↔ movie, dst).
-          for (const item of list) {
-            if (seasonKey(item.title) !== wantSeason) continue;
-            const sim = titleSimilarity(title, item.title);
-            if (sim > bestScore) { bestScore = sim; best = item; }
-          }
-          if (best) break;
-          // 2) Kalau tidak ada exact season, pilih kandidat dengan judul
-          //    paling mirip (substring/Jaccard tertinggi), bukan list[0]
-          //    asal-asalan.
-          for (const item of list) {
-            const sim = titleSimilarity(title, item.title);
-            if (sim > bestScore) { bestScore = sim; best = item; }
-          }
-          if (best && bestScore >= 0.5) break;
-        } catch (e) {
-          console.warn('Forced Kuramanime lookup failed:', e);
-        }
-      }
-      if (best?.animeId) {
-        setSourceIds(prev => ({ ...prev, kuramanime: best.animeId }));
-        switchSource('kuramanime', best.animeId);
-        return;
-      }
-    }
-
-    // Keep the full title (with season) so matching stays season-accurate.
-    const cleanTitle = title
-      .replace(/\(TV\)/gi, "")
-      .replace(/Subtitle Indonesia/gi, "")
-      .replace(/Sub Indo/gi, "")
-      .trim();
-    try {
-      // Populate backup source ID (otakudesu) dari aggregate result.
-      const results = await searchAnimeAggregate(cleanTitle);
-      if (Array.isArray(results) && results.length > 0 && results[0].sourceIds) {
-        setSourceIds(prev => ({ ...prev, ...results[0].sourceIds }));
-      }
-
-      // PENTING: Hanya populasi sourceIds.kuramanime untuk fitur switch manual,
-      // JANGAN auto-switch. Sebelumnya kalau user klik anime dengan tag Otaku,
-      // kode ini langsung mem-switch ke Kuramanime karena kebetulan ketemu.
-      // Sekarang sumber yang dipilih user (activeSource) selalu dihormati.
-      if (activeSource !== 'kuramanime' && !sourceIds.kuramanime) {
-        try {
-          const res = await fetch(`${API_BASE_URL}/kuramanime/search?q=${encodeURIComponent(cleanTitle)}`);
-          const json = await res.json();
-          const list = json?.data?.animeList || [];
-          if (Array.isArray(list) && list.length > 0) {
-            const wantSeason = seasonKey(title);
-            const SIMILARITY_THRESHOLD = 0.55;
-            let best = null;
-            let bestScore = 0;
-            for (const item of list) {
-              if (seasonKey(item.title) !== wantSeason) continue;
-              const sim = titleSimilarity(title, item.title);
-              const lowA = normalizeForCompare(title);
-              const lowB = normalizeForCompare(item.title);
-              const substr = lowA && lowB && (lowA.includes(lowB) || lowB.includes(lowA));
-              const score = substr ? Math.max(sim, 0.7) : sim;
-              if (score > bestScore) {
-                bestScore = score;
-                best = item;
-              }
-            }
-            if (best && bestScore >= SIMILARITY_THRESHOLD && best.animeId) {
-              setSourceIds(prev => ({ ...prev, kuramanime: best.animeId }));
-            }
-          }
-        } catch (e) {
-          console.warn('Kuramanime alt-source lookup failed:', e);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to resolve alternative sources:", e);
-    }
-  };
-  // Check Bookmark Status on Load
-  useEffect(() => {
-    if (anime) {
-      try {
-        const userId = getCurrentUserId();
-        const suffix = activeSource === 'nekopoi' ? 'khusus' : 'umum';
-        const storageKey = `mahistream_bookmarks_${suffix}_${userId}`;
-        const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
-        setIsBookmarked(saved.some(b => b.id === anime.id));
-      } catch (e) {
-        console.error("Bookmark parse error", e);
-      }
-    }
-  }, [anime, activeSource]);
-
-  const toggleBookmark = () => {
-    if (!anime) return;
-    try {
-      const userId = getCurrentUserId();
-      const suffix = activeSource === 'nekopoi' ? 'khusus' : 'umum';
-      const storageKey = `mahistream_bookmarks_${suffix}_${userId}`;
-      const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      if (isBookmarked) {
-        const newSaved = saved.filter(b => b.id !== anime.id);
-        localStorage.setItem(storageKey, JSON.stringify(newSaved));
-        setIsBookmarked(false);
-        showToast("Bookmark seri dihapus");
-      } else {
-        saved.push({ id: anime.id, title: anime.title, posterUrl: anime.poster || '', source: activeSource });
-        localStorage.setItem(storageKey, JSON.stringify(saved));
-        setIsBookmarked(true);
-        showToast("Seri berhasil disimpan");
-      }
-    } catch (e) {
-      console.error("Bookmark save error", e);
-    }
-  };
-
-  // Check Video Bookmark status
-  useEffect(() => {
-    if (currentEpisode) {
-      const saved = JSON.parse(localStorage.getItem('mahistream_video_bookmarks') || '[]');
-      setIsVideoBookmarked(saved.some(b => b.id === currentEpisode.id));
-    }
-  }, [currentEpisode]);
-
-  const toggleVideoBookmark = () => {
-    if (!currentEpisode || !anime) return;
-    const saved = JSON.parse(localStorage.getItem('mahistream_video_bookmarks') || '[]');
-    if (isVideoBookmarked) {
-      const newSaved = saved.filter(b => b.id !== currentEpisode.id);
-      localStorage.setItem('mahistream_video_bookmarks', JSON.stringify(newSaved));
-      setIsVideoBookmarked(false);
-      showToast("Bookmark video dihapus");
-    } else {
-      saved.push({
-        id: currentEpisode.id,
-        animeId: anime.id,
-        animeTitle: anime.title,
-        episodeTitle: currentEpisode.title,
-        posterUrl: anime.poster || "",
-        source: activeSource
-      });
-      localStorage.setItem('mahistream_video_bookmarks', JSON.stringify(saved));
-      setIsVideoBookmarked(true);
-      showToast("Video berhasil disimpan");
-    }
-  };
-
-  const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
-  };
-
-  // 2. Fetch Video Stream URL when Episode Changes
-  useEffect(() => {
-    if (!currentEpisode || !anime) return;
-
-    // Reset skip states for new episode
-    setIntroSkipped(false);
-    setOutroSkipped(false);
-    setSkipIntroDismissed(false);
-
-    // Only save history if started watching
-    if (hasStartedPlaying) {
-      const userId = getCurrentUserId();
-      saveHistory(userId, {
-        id: anime.id,
-        title: anime.title,
-        poster: anime.poster || "",
-        episode: currentEpisode.number || (currentEpisode.title?.match(/\d+/) || ['1'])[0],
-        source: activeSource,
-        progressSeconds: initialTimeRef.current
-      });
-    }
-
-    const loadVideo = async () => {
-      setIsVideoLoading(true);
-      setPlaying(false);
-      try {
-        let resultDetails = null;
-        const data = await fetchSourceEpisodeDetails(activeSource, currentEpisode.id);
-        if (data) {
-          resultDetails = data;
-        }
-        
-        if (resultDetails) {
-          if (activeSource === 'nekopoi' && resultDetails.streamLinks) resultDetails.serverList = resultDetails.streamLinks.map(s => ({ title: s.serverName || 'Nekopoi Player', serverId: s.serverId }));
-          setEpisodeDetails(resultDetails);
-          
-          let finalStreamUrl = "";
-          let defaultServer = null;
-
-          if (activeSource === 'otakudesu') {
-            const serverQualities = resultDetails.server?.qualityList || [];
-            // Utamakan resolusi tertinggi yang tersedia (mis. 1080p > 720p > 480p).
-            let matchedQuality = pickHighest(serverQualities, q => q.title || q.quality || '');
-
-            if (matchedQuality && matchedQuality.serverList?.length > 0) {
-              const preferredNames = ['desustream', 'pdrain', 'filedon', 'otakuwatch', 'yourupload'];
-              for (const pref of preferredNames) {
-                 const found = matchedQuality.serverList.find(s => s.title.toLowerCase().includes(pref));
-                 if (found) {
-                    defaultServer = found;
-                    break;
-                 }
-              }
-              if (!defaultServer) {
-                 defaultServer = matchedQuality.serverList[0];
-              }
-              setActiveResolution(matchedQuality.quality || matchedQuality.title || activeResolution || '720p');
-            }
-          } else if (activeSource === 'kuramanime') {
-             if (resultDetails.serverList?.length > 0) {
-                // Utamakan resolusi tertinggi yang tersedia (Kuramanime biasanya 1080p).
-                defaultServer = pickHighest(resultDetails.serverList, s => s.title || '') || resultDetails.serverList[0];
-                setActiveResolution(defaultServer.title || '1080p');
-             } else if (resultDetails.defaultStreamingUrl) {
-                finalStreamUrl = `${API_BASE_URL}/kuramanime/stream-proxy?url=${encodeURIComponent(resultDetails.defaultStreamingUrl)}`;
-                setActiveResolution('1080p');
-             } else {
-                // Movie / OVA di Kuramanime kadang tidak balikkan serverList maupun
-                // defaultStreamingUrl di endpoint details — hanya `streamingUrls`/
-                // `videoUrl`/`url` di body. Coba field-field tersebut sebelum
-                // declare gagal.
-                const alt = resultDetails.streamingUrls
-                  || resultDetails.streamLinks
-                  || resultDetails.videoUrl
-                  || resultDetails.url;
-                if (Array.isArray(alt) && alt.length > 0 && alt[0]?.url) {
-                  finalStreamUrl = `${API_BASE_URL}/kuramanime/stream-proxy?url=${encodeURIComponent(alt[0].url)}`;
-                  setActiveResolution(alt[0].quality || alt[0].title || '1080p');
-                } else if (typeof alt === 'string' && alt) {
-                  finalStreamUrl = `${API_BASE_URL}/kuramanime/stream-proxy?url=${encodeURIComponent(alt)}`;
-                  setActiveResolution('1080p');
-                } else {
-                  // Last resort: panggil fetchSourceStreamUrl dengan episode ID
-                  // sebagai serverId. Backend kuramanime/stream/:id menerima
-                  // episode ID langsung dan extract stream-nya untuk kasus
-                  // movie yang structure detailnya tidak standar.
-                  try {
-                    const direct = await fetchSourceStreamUrl('kuramanime', currentEpisode.id);
-                    if (direct) {
-                      finalStreamUrl = direct;
-                      setActiveResolution('1080p');
-                    }
-                  } catch (e) {
-                    console.warn('Kuramanime direct stream fallback failed:', e);
-                  }
-                }
-             }
-          } else if (activeSource === 'nekopoi') {
-             // Player utama Nekopoi sekarang adalah iframe ad-stripped dari backend
-             // (/nekopoi/iframe-proxy). Ekstraksi Puppeteer tidak dapat diandalkan,
-             // jadi cukup pilih server prioritas teratas (720p > vidnest > generik
-             // > streamruby/streampoi) dan biarkan getIframeUrl() yang menyalurkan.
-             const servers = orderNekopoiServers(resultDetails.serverList || []);
-             if (servers.length === 0) {
-               setVideoError('Tidak ada server Nekopoi tersedia.');
-             } else {
-               const chosen = servers[0];
-               const label = `${chosen.serverName || ''} ${chosen.title || ''} ${chosen.quality || ''} ${chosen.serverId || ''}`.toLowerCase();
-               let detectedQuality = 'Auto';
-               if (label.includes('720p') || label.includes('720 p')) detectedQuality = '720p';
-               else if (label.includes('1080p')) detectedQuality = '1080p';
-               else if (label.includes('480p')) detectedQuality = '480p';
-               else if (label.includes('360p')) detectedQuality = '360p';
-               setActiveResolution(detectedQuality);
-               setActiveServerId(chosen.serverId);
-               finalStreamUrl = chosen.serverId; // URL embed; iframe path akan mem-proxy
-             }
-          }
-          
-          if (defaultServer && !finalStreamUrl) {
-             let resolvedUrl = await fetchSourceStreamUrl(activeSource, defaultServer.serverId);
-             if (resolvedUrl) {
-                 finalStreamUrl = resolvedUrl;
-             } else {
-                 finalStreamUrl = resultDetails.defaultStreamingUrl || "";
-             }
-             setActiveResolution(defaultServer.title || defaultServer.serverId);
-             setActiveServerId(defaultServer.serverId);
-          } else if (resultDetails.defaultStreamingUrl && !finalStreamUrl) {
-             finalStreamUrl = resultDetails.defaultStreamingUrl;
-          }
-
-          // Paksa semua sumber ke player kustom: ekstrak embed jadi stream langsung.
-          if (activeSource !== 'nekopoi') {
-            finalStreamUrl = await resolveEmbedToStream(finalStreamUrl, activeSource);
-          }
-
-          setStreamUrl(finalStreamUrl);
-        } else {
-          setVideoError("Maaf, link streaming tidak tersedia.");
-        }
-      } catch(e) {
-        console.error(e);
-        setVideoError("Gagal memuat detail episode.");
-      } finally {
-        setIsVideoLoading(false);
-      }
-    };
-    
-    loadVideo();
-  }, [currentEpisode]);
-
-  const handleServerChange = async (server) => {
-    if (!server || !server.serverId || activeServerId === server.serverId) return;
-    setIsVideoLoading(true);
-    setVideoError(null);
-    setPlaying(false);
-    setActiveServerId(server.serverId);
-    setActiveResolution(server.title || server.serverId);
-    
-    try {
-      // Nekopoi: langsung gunakan URL embed; getIframeUrl() yang akan
-      // menyalurkan via /nekopoi/iframe-proxy (ad-stripped) ke <iframe>.
-      if (activeSource === 'nekopoi') {
-        setStreamUrl(server.serverId);
-        setIsVideoLoading(false);
-        return;
-      }
-      let resolvedUrl = await fetchSourceStreamUrl(activeSource, server.serverId);
-      if (resolvedUrl) {
-          // Paksa ke player kustom: ekstrak embed jadi stream langsung bila perlu.
-          resolvedUrl = await resolveEmbedToStream(resolvedUrl, activeSource);
-          setStreamUrl(resolvedUrl);
-      } else {
-          setVideoError("Gagal mendapatkan link streaming dari server ini.");
-      }
-    } catch (e) {
-      setVideoError("Error saat menghubungi server stream.");
-    } finally {
-      setIsVideoLoading(false);
-    }
-  };
-
-  const handleResolutionChange = async (resolution) => {
-    setShowResolutionMenu(false);
-
-    if (activeSource === 'nekopoi') {
-      setActiveResolution(resolution);
-      return;
-    }
-
-    const currentEpNum = currentEpisode?.number || "1";
-
-    // 4K / 1080p → Kuramanime (jika tersedia). Jika resolusi 4K diminta
-    // tapi sumber tidak punya, tetap pakai resolusi tersebut sebagai label
-    // (player akan pakai bitrate tertinggi yang tersedia).
-    if (resolution === '4K' || resolution === '2160p' || resolution === '1080p') {
-      if (activeSource !== 'kuramanime') {
-        showToast(`Beralih ke Kuramanime untuk ${resolution}...`);
-        await switchSource('kuramanime', null, currentEpNum);
-      }
-      setActiveResolution(resolution);
-      return;
-    }
-
-    // 360p, 480p, 720p → prefer Otakudesu kalau ID-nya ada.
-    const otakuSourceId = sourceIds['otakudesu'];
-    if (otakuSourceId || activeSource === 'otakudesu') {
-      if (activeSource !== 'otakudesu') {
-        showToast(`Beralih ke Otakudesu untuk ${resolution}...`);
-        await switchSource('otakudesu', null, currentEpNum);
-      }
-      setActiveResolution(resolution);
-    } else {
-      showToast(`Otakudesu tidak tersedia, memutar ${resolution} di Kuramanime...`);
-      if (activeSource !== 'kuramanime') {
-        await switchSource('kuramanime', null, currentEpNum);
-      }
-      setActiveResolution(resolution);
-    }
-  };
-
-  const handleSeekMouseDown = () => setSeeking(true);
-
-  const formatTime = (seconds) => {
-    if (isNaN(seconds)) return '00:00';
-    const date = new Date(seconds * 1000);
-    const hh = date.getUTCHours();
-    const mm = date.getUTCMinutes();
-    const ss = date.getUTCSeconds().toString().padStart(2, '0');
-    if (hh) {
-      return `${hh}:${mm.toString().padStart(2, '0')}:${ss}`;
-    }
-    return `${mm}:${ss}`;
-  };
-
-  const toggleFullScreen = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await playerContainerRef.current.requestFullscreen();
-        if (Capacitor.isNativePlatform()) {
-          await ScreenOrientation.lock({ orientation: 'landscape' });
-        } else if (window.screen && window.screen.orientation && window.screen.orientation.lock) {
-          window.screen.orientation.lock('landscape').catch(err => {
-            console.warn("Fullscreen orientation lock failed", err);
-          });
-        }
-      } else {
-        await document.exitFullscreen();
-        if (Capacitor.isNativePlatform()) {
-          await ScreenOrientation.lock({ orientation: 'portrait' });
-          await ScreenOrientation.unlock();
-        } else if (window.screen && window.screen.orientation && window.screen.orientation.unlock) {
-          window.screen.orientation.unlock();
-        }
-      }
-    } catch (err) {
-      console.error(`Error attempting to toggle fullscreen: ${err.message}`);
-    }
-  };
-
-  const handleVideoError = async (e) => {
-    console.warn("Video failed to load.");
-    const err = e?.target?.error;
-    const code = err?.code;
-    const message = err?.message || '';
-    const isDemuxer = /DEMUXER|DECODER|PIPELINE/i.test(message);
-
-    // Nekopoi: stream berhasil diekstrak tetapi CDN menolak pemutaran (mis. token
-    // streamruby dikunci ke sesi embed -> 403, atau host CDN tak terjangkau -> 500).
-    // CADANGAN TERAKHIR: putar embed situs lewat iframe pakai URL embed (activeServerId).
-    // Hanya untuk Nekopoi (sumber khusus); Kurama/Otaku tetap pakai player kustom.
-    if (
-      activeSource === 'nekopoi' &&
-      activeServerId &&
-      activeServerId.startsWith('http') &&
-      streamUrl !== activeServerId
-    ) {
-      console.warn("Nekopoi custom stream gagal diputar, fallback ke iframe embed.");
-      showToast("Beralih ke pemutar situs...");
-      setStreamUrl(activeServerId);
-      return;
-    }
-
-    // Kuramanime / Otakudesu: error decoder DEMUXER_ERROR_COULD_NOT_OPEN
-    // hampir selalu berarti URL stream sudah expire (token Kuramanime
-    // lifetime pendek, ~10 menit) atau response berisi HTML bukan video.
-    // Recovery WAJIB tetap di player kustom (sesuai permintaan user) —
-    // tidak boleh fallback iframe. Strategi:
-    //   1. Re-resolve stream URL via fetchSourceStreamUrl untuk server saat
-    //      ini (token baru).
-    //   2. Kalau itu sudah pernah dicoba (re-resolved=true), pindah ke
-    //      server lain di episodeDetails.serverList dan re-resolve.
-    //   3. Kalau semua habis, tampilkan UI error dengan tombol Muat Ulang
-    //      Stream (memicu loadVideo ulang dari scratch).
-    if ((activeSource === 'kuramanime' || activeSource === 'otakudesu') && isDemuxer) {
-      const triedFresh = streamUrl?.includes('__rt=1');
-      // Step 1: re-fetch fresh stream URL untuk activeServerId.
-      if (!triedFresh && activeServerId) {
-        try {
-          showToast('Memperbarui link stream...');
-          let fresh = await fetchSourceStreamUrl(activeSource, activeServerId);
-          if (fresh) {
-            fresh = await resolveEmbedToStream(fresh, activeSource);
-            // Tambahkan marker query supaya kita tahu sudah retry.
-            const sep = fresh.includes('?') ? '&' : '?';
-            setStreamUrl(`${fresh}${sep}__rt=1&__ts=${Date.now()}`);
-            return;
-          }
-        } catch (e1) {
-          console.warn('Re-resolve stream URL gagal:', e1);
-        }
-      }
-      // Step 2: server lain.
-      if (episodeDetails?.serverList?.length > 1) {
-        const remaining = episodeDetails.serverList.filter((s) => s.serverId !== activeServerId);
-        if (remaining.length > 0) {
-          const nextServer = remaining[0];
-          console.warn(`DEMUXER error, beralih ke server: ${nextServer.title || nextServer.serverId}`);
-          showToast(`Beralih ke ${nextServer.title || 'server lain'}...`);
-          await handleServerChange(nextServer);
-          return;
-        }
-      }
-      // Step 3: tampilkan UI error (handler "Coba Lagi" akan trigger
-      // loadVideo ulang dengan men-toggle currentEpisode).
-      setVideoError('Tidak ada server stabil saat ini. Coba muat ulang atau pilih resolusi lain.');
-      return;
-    }
-
-    if (err) {
-      const friendly = isDemuxer
-        ? 'Format video tidak bisa diputar. Coba pilih server atau resolusi lain.'
-        : `Video Error Code: ${code}, Message: ${message}`;
-      setVideoError(friendly);
-    } else {
-      setVideoError("Unknown Video Error");
-    }
-  };
-
-  const onLoadedMetadata = (e) => {
-    const dur = e.target.duration;
-    setDuration(dur);
-    
-    // Seek to saved elapsed progress
-    const t = parseInt(searchParams.get('t') || '0');
-    if (t > 0 && t < dur) {
-      e.target.currentTime = t;
-      setCurrentTime(t);
-      setPlayed(t / dur);
-      showToast(`Melanjutkan di ${formatTime(t)}`);
-    }
-  };
-
-  // Susun daftar opsi download dari semua sumber, urut dari resolusi tertinggi
-  // ke terendah supaya user (atau auto-pick) langsung dapat kualitas terbaik.
-  const collectDownloadOptions = () => {
-    const opts = [];
-    if (!episodeDetails) return opts;
-    const qualityList = episodeDetails.download?.qualityList || [];
-    qualityList.forEach((q) => {
-      (q.urlList || []).forEach((u) => {
-        if (u.url) opts.push({ quality: q.title || q.quality || '?', host: u.title || 'Server', url: u.url });
-      });
-    });
-    (episodeDetails.download?.formatList || []).forEach((fmt) => {
-      (fmt.qualityList || []).forEach((q) => {
-        (q.urlList || []).forEach((u) => {
-          if (u.url) opts.push({ quality: q.title || '?', host: u.title || fmt.title || 'Server', url: u.url });
-        });
-      });
-    });
-    (episodeDetails.downloadLinks || []).forEach((dl) => {
-      (dl.links || []).forEach((u) => {
-        if (u.url) opts.push({ quality: dl.quality || '?', host: u.host || 'Server', url: u.url });
-      });
-    });
-    // Urutkan dari resolusi tertinggi ke terendah berdasar angka di label.
-    opts.sort((a, b) => resolutionScore(b.quality) - resolutionScore(a.quality));
-    return opts;
-  };
-
-  // Kelompokkan opsi download per resolusi standar (4K, 1080p, 720p, 480p, 360p)
-  // agar UI modal bisa menampilkan satu tombol per resolusi (klik = mulai
-  // unduh host pertama yang tersedia). Resolusi yang tidak ada hostnya tidak
-  // dimunculkan (mis. anime cuma sampai 720p tidak akan tampil 4K/1080p).
-  const groupDownloadByResolution = () => {
-    const opts = collectDownloadOptions();
-    const labels = ['4k', '2160p', '1080p', '720p', '480p', '360p', '240p'];
-    const display = {
-      '4k': '4K', '2160p': '4K',
-      '1080p': '1080p', '720p': '720p', '480p': '480p', '360p': '360p', '240p': '240p',
-    };
-    const buckets = new Map();
-    for (const o of opts) {
-      const q = String(o.quality || '').toLowerCase();
-      const matched = labels.find((l) => q.includes(l));
-      if (!matched) continue;
-      const key = display[matched];
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(o);
-    }
-    // Urutan tampilan: 4K dulu (kalau ada), lalu 1080p → 360p
-    const order = ['4K', '1080p', '720p', '480p', '360p', '240p'];
-    return order
-      .filter((k) => buckets.has(k))
-      .map((k) => ({ resolution: k, hosts: buckets.get(k) }));
-  };
-
-  // Daftar resolusi yang BENAR-BENAR tersedia di episode aktif, untuk
-  // dipakai di bottom-sheet pemilih resolusi (tidak hardcoded). Diambil
-  // dari semua quality download/server, dipetakan ke label standar
-  // 4K/1080p/720p/480p/360p/240p, lalu deduplikasi.
-  const availableResolutions = (() => {
-    const opts = collectDownloadOptions();
-    const labelMap = [
-      { needle: ['2160p', '4k'], display: '4K' },
-      { needle: ['1080p'], display: '1080p' },
-      { needle: ['720p'], display: '720p' },
-      { needle: ['480p'], display: '480p' },
-      { needle: ['360p'], display: '360p' },
-      { needle: ['240p'], display: '240p' },
-    ];
-    const seen = new Set();
-    const out = [];
-    for (const o of opts) {
-      const q = String(o.quality || '').toLowerCase();
-      for (const m of labelMap) {
-        if (m.needle.some((n) => q.includes(n)) && !seen.has(m.display)) {
-          seen.add(m.display);
-          out.push(m.display);
-          break;
-        }
-      }
-    }
-    // Tambahkan server-side qualityList kalau ada (server stream, bukan download).
-    (episodeDetails?.server?.qualityList || []).forEach((q) => {
-      const label = String(q.title || q.quality || '').toLowerCase();
-      for (const m of labelMap) {
-        if (m.needle.some((n) => label.includes(n)) && !seen.has(m.display)) {
-          seen.add(m.display);
-          out.push(m.display);
-          break;
-        }
-      }
-    });
-    // Urutan: 4K → 240p
-    const order = ['4K', '1080p', '720p', '480p', '360p', '240p'];
-    return order.filter((r) => seen.has(r));
-  })();
-
-  const handleDownloadEpisode = () => {
-    // Selalu buka modal — kalau episodeDetails belum siap, modal akan
-    // tampilkan empty state dan refresh otomatis saat data datang. Lebih
-    // baik daripada toast "Gagal memuat" yang bikin user mengira tombol mati.
-    setShowDownloadModal(true);
-  };
-
-  // Buka modal UNDUH BATCH (full series). Hanya support otakudesu untuk
-  // sekarang — sumber lain belum punya endpoint /batch/{batchId}. Endpoint
-  // /otakudesu/anime/{id} mengembalikan `batch: { batchId }` kalau anime
-  // punya batch. Kita fetch detailnya supaya user dapat list resolusi
-  // batch lengkap (zip per kualitas).
-  const handleDownloadBatch = async () => {
-    setShowBatchModal(true);
-    if (batchOptions !== null) return; // sudah pernah fetch
-    setBatchLoading(true);
-    try {
-      // anime?.batch adalah hasil parseAnimeDetails Otakudesu (kalau ada).
-      const batchId = anime?.batch?.batchId || sourceIds?.otakudesu?.replace(/^anime\//, '');
-      if (activeSource !== 'otakudesu' && !sourceIds?.otakudesu) {
-        setBatchOptions([]);
-        return;
-      }
-      const useBatchId = anime?.batch?.batchId;
-      if (!useBatchId) {
-        setBatchOptions([]);
-        return;
-      }
-      const res = await fetch(`${API_BASE_URL}/otakudesu/batch/${encodeURIComponent(useBatchId)}`);
-      if (!res.ok) { setBatchOptions([]); return; }
-      const json = await res.json();
-      const fmtList = json?.data?.details?.download?.formatList || [];
-      const opts = [];
-      fmtList.forEach((fmt) => {
-        (fmt.qualityList || []).forEach((q) => {
-          (q.urlList || []).forEach((u) => {
-            if (u.url) opts.push({
-              quality: q.title || '?',
-              host: u.title || fmt.title || 'Server',
-              url: u.url,
-              size: q.size || '',
-            });
-          });
-        });
-      });
-      opts.sort((a, b) => resolutionScore(b.quality) - resolutionScore(a.quality));
-      setBatchOptions(opts);
-    } catch (e) {
-      console.warn('handleDownloadBatch failed', e);
-      setBatchOptions([]);
-    } finally {
-      setBatchLoading(false);
-    }
-  };
-
-  // Trigger download di latar belakang via downloadManager (Capacitor
-  // Filesystem + LocalNotifications di Android, blob anchor di web). Tidak
-  // membuka tab/browser baru — file ditulis langsung ke folder Download
-  // device dan progress muncul di notifikasi sistem.
-  const startBackgroundDownload = (urlOrList, quality) => {
-    // Accept single URL string or array of mirror URLs (sorted by priority).
-    // FILTER PENTING: banyak entry di Kurama downloadLinks adalah HTML
-    // landing page (kuramadrive.com, doodrive, qiwi, mega, mirrorace) atau
-    // Nekopoi ouo.io ad-shortener — bukan direct MP4. Saring keluar dulu,
-    // lalu pakai defaultStreamingUrl (yang dipakai player) sebagai fallback.
-    const isLandingPage = (u) => {
-      if (!u || typeof u !== 'string') return true;
-      const low = u.toLowerCase();
-      return (
-        low.includes('kuramadrive.com') ||
-        low.includes('doodrive') ||
-        low.includes('qiwi.gg') ||
-        low.includes('mega.nz') ||
-        low.includes('mediafire') ||
-        low.includes('mirrorace') ||
-        low.includes('ouo.io') ||
-        low.includes('safelinkconverter') ||
-        low.includes('linkfor.us') ||
-        low.includes('linkkutu') ||
-        low.includes('linkpoi')
-      );
-    };
-
-    // Ekstrak raw URL dari currentStreamUrl (kalau dia /proxy/stream?url=...)
-    const extractRaw = (u) => {
-      if (!u) return null;
-      try {
-        const idx = u.indexOf('proxy/stream?url=');
-        if (idx >= 0) {
-          const enc = u.slice(idx + 'proxy/stream?url='.length).split('&')[0];
-          return decodeURIComponent(enc);
-        }
-        const idx2 = u.indexOf('kuramanime/stream-proxy?url=');
-        if (idx2 >= 0) {
-          const enc = u.slice(idx2 + 'kuramanime/stream-proxy?url='.length).split('&')[0];
-          return decodeURIComponent(enc);
+        const a = await api(`/anime/${id}`).catch(() => null);
+        if (a && (a.id || a.title)) {
+          animeData = a;
+          const e = await api(`/episodes/${id}`).catch(() => []);
+          episodeData = Array.isArray(e) ? e : (e?.episodes || e?.data || []);
         }
       } catch {}
-      return u;
-    };
 
-    const rawCandidates = Array.isArray(urlOrList) ? urlOrList : [urlOrList];
-    // Filter ke direct CDN dulu
-    let urls = rawCandidates.filter(Boolean).filter((u) => !isLandingPage(u));
+      const cleanId = String(id).replace(/^khusus_/, '');
 
-    // Tambahkan defaultStreamingUrl / streamUrl aktif sebagai fallback
-    // terakhir (kemungkinan besar ini direct MP4 yang dipakai player)
-    const streamRaw = extractRaw(streamUrl);
-    if (streamRaw && !isLandingPage(streamRaw) && !urls.includes(streamRaw)) {
-      urls.push(streamRaw);
-    }
-    const defaultRaw = anime?.defaultStreamingUrl;
-    if (defaultRaw && !isLandingPage(defaultRaw) && !urls.includes(defaultRaw)) {
-      urls.push(defaultRaw);
-    }
+      if (!animeData) {
+        try {
+          const k = await api(`/khusus/${cleanId}`).catch(() => null) || await api(`/khusus/${id}`).catch(() => null);
+          if (k && (k.id || k.title)) {
+            animeData = {
+              id: k.id,
+              title: k.title || 'Konten Khusus',
+              poster: k.poster || '',
+              synopsis: k.description || 'Konten khusus MahiStream',
+              rating: 5,
+              type: 'Khusus',
+              status: 'completed',
+              genre: ['Khusus'],
+              ...k
+            };
+            const rawLinks = typeof k.gdrive_links === 'string'
+              ? JSON.parse(k.gdrive_links)
+              : (k.gdrive_links || []);
+            if (!Array.isArray(rawLinks) || rawLinks.length === 0) {
+              episodeData = [{ number: 1, title: k.title || 'Episode 1', gdrive_links: [] }];
+            } else {
+              const grouped = {};
+              for (const link of rawLinks) {
+                let epNum = link.episode || 1;
+                let finalUrl = link.url || '';
+                const pipeMatch = typeof finalUrl === 'string' ? finalUrl.match(/^(\d+)\|(.+?)\|(.+)/) : null;
+                if (pipeMatch) {
+                  epNum = parseInt(pipeMatch[1]);
+                  finalUrl = pipeMatch[3];
+                }
+                if (!grouped[epNum]) grouped[epNum] = { number: epNum, title: `Episode ${epNum}`, gdrive_links: [] };
+                grouped[epNum].gdrive_links.push({ ...link, episode: epNum, url: finalUrl });
+              }
+              episodeData = Object.values(grouped).sort((a, b) => a.number - b.number);
+            }
+          }
+        } catch {}
+      }
 
-    if (urls.length === 0) {
-      showToast("Link download tidak kompatibel (HTML landing). Coba server lain.");
-      return;
+      if (!animeData) {
+        const khususList = await api('/khusus').catch(() => []);
+        const khususItem = Array.isArray(khususList) ? khususList.find(k => 
+          String(k.id) === String(id) || 
+          String(k.id) === cleanId || 
+          String(k.anime_id) === String(id) || 
+          String(k.anime_id) === cleanId ||
+          k.id == cleanId ||
+          k.id == id
+        ) : null;
+
+        if (khususItem) {
+          animeData = {
+            id: khususItem.id,
+            title: khususItem.title || 'Konten Khusus',
+            poster: khususItem.poster || '',
+            synopsis: khususItem.description || 'Konten khusus MahiStream',
+            rating: 5,
+            type: 'Khusus',
+            status: 'completed',
+            genre: ['Khusus'],
+            ...khususItem
+          };
+          const rawLinks = typeof khususItem.gdrive_links === 'string'
+            ? JSON.parse(khususItem.gdrive_links)
+            : (khususItem.gdrive_links || []);
+          if (!Array.isArray(rawLinks) || rawLinks.length === 0) {
+            episodeData = [{ number: 1, title: khususItem.title || 'Episode 1', gdrive_links: [] }];
+          } else {
+            const grouped = {};
+            for (const link of rawLinks) {
+              let epNum = link.episode || 1;
+              let finalUrl = link.url || '';
+              const pipeMatch = typeof finalUrl === 'string' ? finalUrl.match(/^(\d+)\|(.+?)\|(.+)/) : null;
+              if (pipeMatch) {
+                epNum = parseInt(pipeMatch[1]);
+                finalUrl = pipeMatch[3];
+              }
+              if (!grouped[epNum]) grouped[epNum] = { number: epNum, title: `Episode ${epNum}`, gdrive_links: [] };
+              grouped[epNum].gdrive_links.push({ ...link, episode: epNum, url: finalUrl });
+            }
+            episodeData = Object.values(grouped).sort((a, b) => a.number - b.number);
+          }
+        }
+      }
+
+      if (animeData) {
+        setAnime(animeData);
+        api(`/bookmarks/${uid()}`).then(bmResult => {
+          setBm(Array.isArray(bmResult) && bmResult.some(x => String(x.anime_id) === String(id) || String(x.anime_id) === String(animeData.id)));
+        }).catch(() => {});
+        api(`/favorites/${uid()}/${id}`).then(favResult => setFav(!!favResult)).catch(() => {});
+        api(`/watchlist/${uid()}/${id}`).then(wlResult => setWl(wlResult)).catch(() => {});
+      }
+
+      const eps = (Array.isArray(episodeData) && episodeData.length > 0) 
+        ? episodeData 
+        : (Array.isArray(animeData?.episodeList) && animeData.episodeList.length > 0)
+        ? animeData.episodeList
+        : (Array.isArray(animeData?.episodes) && animeData.episodes.length > 0)
+        ? animeData.episodes
+        : [];
+
+      setEpisodes(eps);
+
+      const epParam = searchParams.get("ep");
+      const epNum = epParam ? parseInt(epParam) : 1;
+      let found = eps.find(e => Number(e.number) === epNum || String(e.number) === String(epNum));
+      if (!found && eps.length > 0) found = eps[0];
+
+      setCurrentEp(found);
+      setLoading(false);
+    })().catch(() => setLoading(false));
+  }, [id, searchParams]);
+
+  const changeEp = useCallback((dir) => {
+    if (batchQueue.length > 0) {
+      const bi = batchQueue.findIndex(n => n === currentEp?.number);
+      const nextNum = batchQueue[bi + dir];
+      if (nextNum) {
+        const next = episodes.find(e => e.number === nextNum);
+        if (next) { setCurrentEp(next); return; }
+      }
     }
+    const idx = episodes.findIndex(e => e.number === currentEp?.number);
+    const next = episodes[idx + dir];
+    if (next) setCurrentEp(next);
+  }, [batchQueue, currentEp, episodes]);
+
+  const onEnded = useCallback(() => {
+    if (batchQueue.length > 0) {
+      const bi = batchQueue.findIndex(n => n === currentEp?.number);
+      const nextNum = batchQueue[bi + 1];
+      if (nextNum) {
+        const next = episodes.find(e => e.number === nextNum);
+        if (next) { setCurrentEp(next); return; }
+      }
+    }
+    const idx = episodes.findIndex(e => e.number === currentEp?.number);
+    if (idx < episodes.length - 1) changeEp(1);
+  }, [batchQueue, currentEp, episodes]);
+
+  const handleBookmark = async () => {
     try {
-      startBackgroundDownloadNative({
-        animeTitle: anime?.title || 'Anime',
-        episode: currentEpisode?.number || '?',
-        resolution: quality || 'auto',
-        url: urls[0],
-        urls,
-      });
-      setDownloadStartedToast({
-        title: anime?.title || 'Anime',
-        episode: currentEpisode?.number || '?',
-        resolution: quality || 'auto',
-      });
-      setTimeout(() => setDownloadStartedToast(null), 3500);
-    } catch (e) {
-      console.error('startBackgroundDownload failed', e);
-      showToast('Gagal memulai unduhan');
-    }
-    setShowDownloadModal(false);
+      const r = await toggleBookmark(id, anime?.title, anime?.poster);
+      setBm(r?.bookmarked ?? !bm);
+      toast(r?.bookmarked ? "Ditambahkan ke bookmark" : "Dihapus dari bookmark", "success");
+    } catch { toast("Gagal", "error"); }
   };
 
+  const toggleFav = async () => {
+    try {
+      if (fav) { await api(`/favorites/${uid()}/${id}`, "DELETE"); setFav(false); toast("Dihapus dari favorit", "info"); }
+      else { await api(`/favorites/${uid()}/${id}`, "POST"); setFav(true); toast("Ditambahkan ke favorit", "success"); }
+    } catch { toast("Gagal", "error"); }
+  };
+
+  const epNumbers = useMemo(() => episodes.map(e => e.number), [episodes]);
+  const curIdx = episodes.findIndex(e => e.number === currentEp?.number);
+  const hasPrev = useMemo(() => curIdx > 0 || (batchQueue.length > 0 && batchQueue.findIndex(n => n === currentEp?.number) > 0), [curIdx, batchQueue, currentEp]);
+  const hasNext = useMemo(() => curIdx < episodes.length - 1 || (batchQueue.length > 0 && batchQueue.findIndex(n => n === currentEp?.number) < batchQueue.length - 1), [curIdx, episodes, batchQueue, currentEp]);
+  const onPrev = useCallback(() => changeEp(-1), [changeEp]);
+  const onNext = useCallback(() => changeEp(1), [changeEp]);
+  const onSelectEpisode = useCallback((n) => {
+    const ep = episodes.find(e => e.number === n);
+    if (ep) setCurrentEp(ep);
+  }, [episodes]);
+
+  const getQualities = (ep) => {
+    if (!ep) return {};
+    try {
+      const links = typeof ep.gdrive_links === 'string' ? JSON.parse(ep.gdrive_links) : (ep.gdrive_links || []);
+      const q = {};
+      links.forEach((l, i) => { q[l.label || `Resolusi ${i+1}`] = resolveVideoUrl(l.url); });
+      return q;
+    } catch { return {}; }
+  };
+
+  const baseQualities = useMemo(() => getQualities(currentEp), [currentEp]);
+
+  const anyScrapable = (() => {
+    if (!currentEp) return false;
+    const links = typeof currentEp.gdrive_links === 'string'
+      ? (() => { try { return JSON.parse(currentEp.gdrive_links); } catch { return []; } })()
+      : (currentEp.gdrive_links || []);
+    if (links.length === 0) return true;
+    const dead = links.filter(l => !l?.url || /t\.me|telegram\.me|api\/telegram|tg-stream/.test(l.url));
+    return dead.length === links.length;
+  })();
+
   useEffect(() => {
-    let hls = null;
-    if (playerRef.current && streamUrl) {
-      const isM3u8 = streamUrl.includes('.m3u8') || streamUrl.includes('m3u8');
-      
-      if (isM3u8 && Hls.isSupported()) {
-        hls = new Hls();
-        hls.loadSource(streamUrl);
-        hls.attachMedia(playerRef.current);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-           console.log("HLS Manifest parsed");
-        });
-        hls.on(Hls.Events.ERROR, (event, data) => {
-           if (data.fatal) {
-              switch(data.type) {
-                 case Hls.ErrorTypes.NETWORK_ERROR:
-                   hls.startLoad();
-                   break;
-                 case Hls.ErrorTypes.MEDIA_ERROR:
-                   hls.recoverMediaError();
-                   break;
-                 default:
-                   hls.destroy();
-                   break;
-              }
-           }
-        });
-      }
-    }
-    
-    return () => {
-      if (hls) {
-        hls.destroy();
-      }
-    };
-  }, [streamUrl]);
+    if (!anyScrapable || !currentEp || !anime) { setScraperQualities({}); return; }
+    let cancelled = false;
+    setScraperQualities({});
+    scraperResolve(anime.title || anime.title_jp || anime.title_en || '', currentEp.number)
+      .then(url => { if (!cancelled && url) setScraperQualities({ 'Kuramanime': url }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [currentEp, anime?.id]);
 
-  if (videoError && !anime) {
+  const currentQualities = useMemo(() => {
+    if (anyScrapable && Object.keys(scraperQualities).length > 0) return scraperQualities;
+    return baseQualities;
+  }, [anyScrapable, scraperQualities, baseQualities]);
+
+  const epKey = currentEp && anime ? `${anime.id}:${currentEp.number}` : null;
+  const dl = epKey ? downloads.find(d => d.key === epKey) : null;
+  const dlKeys = new Map(downloads.map(d => [d.key, d]));
+
+  const handleDownload = async () => {
+    if (!currentEp || !anime) return;
+    if (dl?.status === 'done') {
+      await removeDownload(dl.key);
+      toast('Unduhan dihapus', 'success');
+      return;
+    }
+    if (dl && (dl.status === 'downloading' || dl.status === 'queued')) {
+      cancelDownload(dl.key);
+      toast('Unduhan dibatalkan', 'info');
+      return;
+    }
+    if (dl && (dl.status === 'error' || dl.status === 'canceled')) {
+      await removeDownload(dl.key);
+    }
+    let links = [];
+    try {
+      links = typeof currentEp.gdrive_links === 'string' ? JSON.parse(currentEp.gdrive_links) : (currentEp.gdrive_links || []);
+    } catch {}
+    const first = Array.isArray(links) ? links[0] : null;
+    const scraped = Object.values(currentQualities)[0];
+    if (!first?.url && !scraped) {
+      toast('Episode ini belum punya link video', 'error');
+      return;
+    }
+    const absUrl = resolveVideoUrl(first?.url) || scraped;
+    if (!absUrl || absUrl === FALLBACK) {
+      toast('Link video tidak valid', 'error');
+      return;
+    }
+    startDownload({
+      key: epKey,
+      animeId: anime.id,
+      animeTitle: anime.title || anime.title_jp || '',
+      poster: anime.poster || '',
+      epNumber: currentEp.number,
+      epTitle: currentEp.title || `Episode ${currentEp.number}`,
+      label: first.label || 'HD',
+      url: absUrl
+    });
+    toast('Unduhan dimulai', 'success');
+  };
+
+  if (loading) {
     return (
-      <div className="cr-container min-h-screen flex flex-col items-center justify-center gap-4 bg-[#fdf8f1] p-6 text-center">
-         <CloudOff size={48} className="text-red-500" />
-         <p className="text-red-500 text-sm font-bold">{videoError}</p>
-         <button onClick={() => window.location.reload()} className="mt-4 px-6 py-2.5 bg-primary text-white rounded-xl text-xs font-bold shadow-md hover:bg-primary-dark transition active:scale-95">
-           Coba Lagi / Refresh
-         </button>
-      </div>
+      <Shell>
+        <div className="player-page">
+          <div className="player-loading"><div className="spinner" /></div>
+        </div>
+      </Shell>
+    );
+  }
+  if (!anime) {
+    return (
+      <Shell>
+        <div className="player-page">
+          <div className="player-loading flex-col gap-4">
+            <button onClick={() => navigate(-1)} className="back-btn">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5"/><path d="m11 6-6 6 6 6"/></svg>
+            </button>
+            <p className="text-sm" style={{color:'#a79db0'}}>Anime tidak ditemukan</p>
+          </div>
+        </div>
+      </Shell>
     );
   }
 
-  if (!anime || !currentEpisode) {
-    return (
-      <div className="cr-container min-h-screen flex flex-col items-center justify-center gap-4 bg-[#fdf8f1]">
-         <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-         <p className="text-zinc-500 text-xs font-semibold tracking-widest uppercase">Mempersiapkan Stream...</p>
-      </div>
-    );
-  }
+  return (
+    <Shell>
+      <div className="player-page">
+        <div data-testid="nanimeid-player-skin" className="max-w-6xl mx-auto px-0 sm:px-4">
+          <div className="flex items-center justify-between bg-surface p-2 rounded-t-2xl border-b border-line text-xs">
+            <div className="flex items-center gap-2">
+              <button data-testid="player-prev-episode" onClick={onPrev} disabled={!hasPrev} className="px-2 py-1 rounded bg-elevated text-ink disabled:opacity-40">Prev</button>
+              <button data-testid="player-next-episode" onClick={onNext} disabled={!hasNext} className="px-2 py-1 rounded bg-elevated text-ink disabled:opacity-40">Next</button>
+            </div>
+            <div data-testid="player-progress-bar" className="flex-1 mx-3 h-2 bg-elevated rounded-full overflow-hidden">
+              <div className="h-full bg-accent w-1/3" />
+            </div>
+            <button data-testid="player-fullscreen-btn" className="px-2 py-1 rounded bg-elevated text-ink">Fullscreen</button>
+          </div>
+          <VideoPlayerErrorBoundary>
+            <VideoPlayer
+              anime={anime}
+              animeId={anime.id}
+              title={anime.title || anime.title_jp || ''}
+              poster={anime.poster || ''}
+              episodeNumber={currentEp?.number || 1}
+              epSkipIntro={currentEp?.skip_intro}
+              qualities={currentQualities}
+              onEnded={onEnded}
+              startAt={startAt}
+              hasPrev={hasPrev}
+              hasNext={hasNext}
+              onPrev={onPrev}
+              onNext={onNext}
+              episodes={epNumbers}
+              onSelectEpisode={onSelectEpisode}
+              type={anime.type || anime.type_anime || ''}
+            />
+          </VideoPlayerErrorBoundary>
 
-  // --- R4. DETAIL VIEW ANIME ---
-  // Label sumber yang ditampilkan di badge. Untuk judul yang dipaksa Kuramanime
-  // (mis. Yuru Camp S1-S3) tampilkan "kuramanime" sejak awal, tanpa kedipan "otakudesu"
-  // selama proses switch sumber berjalan di latar.
-  const displaySource = MANUAL_KURAMANIME(anime?.title) ? 'kuramanime' : activeSource;
-
-  if (!hasStartedPlaying) {
-    // Sort episodes according to preference
-    const sortedEpisodes = [...anime.episodes];
-    if (episodeSort === 'desc') {
-      sortedEpisodes.reverse();
-    }
-
-    const isOngoing = anime.status?.toLowerCase().includes("ongoing");
-
-    return (
-      <div className="pb-24 bg-[#fafafa] text-[#18181b]">
-        {/* Detail Hero Section */}
-        <div 
-          className="w-full relative overflow-hidden flex flex-col justify-end"
-          style={{ 
-            height: '55vh',
-            minHeight: '380px',
-            backgroundImage: `linear-gradient(to top, rgba(250, 250, 250, 1) 0%, rgba(250, 250, 250, 0.4) 60%, rgba(0, 0, 0, 0.6) 100%), url(${anime.poster})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center top'
-          }}
-        >
-          {/* Top Actions Floating bar */}
-          <div className="absolute top-4 left-4 right-4 flex justify-between items-center z-20">
-            <button
-              onClick={() => navigate(-1)}
-              className="w-12 h-12 bg-black/40 hover:bg-black/70 rounded-full flex items-center justify-center text-white backdrop-blur-md transition-all border border-white/15 active:scale-95"
-            >
-              <ArrowLeft size={22} />
-            </button>
-
-            <button
-              data-testid="anime-bookmark-toggle-btn"
-              onClick={toggleBookmark}
-              className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md transition-all border active:scale-95 ${
-                isBookmarked
-                  ? 'bg-primary text-white border-primary shadow-lg shadow-primary/40'
-                  : 'bg-black/40 hover:bg-black/70 text-white border-white/15'
-              }`}
-            >
-              <Bookmark size={22} fill={isBookmarked ? 'currentColor' : 'none'} />
-            </button>
+          <div className="mb-5 mt-5 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <h1 data-testid="video-detail-title" className="text-xl font-extrabold tracking-tight text-ink">{anime.title}</h1>
+              <select data-testid="server-selector" className="rounded-lg border border-line bg-elevated px-2 py-1 text-xs text-ink">
+                <option value="otakudesu">Otakudesu</option>
+                <option value="kuramanime">Kuramanime</option>
+              </select>
+              {anime.rating > 0 && (
+                <span className="flex items-center gap-1 text-sm font-bold text-accent2">
+                  <StarIcon size={14} className="fill-accent2" />{Number(anime.rating).toFixed(1)}
+                </span>
+              )}
+              {anime.status && <StatusPill status={anime.status} />}
+            </div>
+            <div className="flex items-center gap-2">
+              <button data-testid="video-bookmark-btn" onClick={handleBookmark}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-elevated text-ink transition hover:border-accent hover:text-accent">
+                {bm ? <BookmarkFillIcon size={15} className="text-accent" /> : <BookmarkIcon size={15} />}
+              </button>
+              <button data-testid="video-like-btn" onClick={toggleFav}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-elevated text-ink transition hover:border-accent hover:text-accent">
+                {fav ? <HeartFillIcon size={15} className="text-accent" /> : <HeartIcon size={15} />}
+              </button>
+              <button onClick={handleDownload} disabled={!currentEp}
+                className={cx("flex h-9 w-9 items-center justify-center rounded-full border transition disabled:opacity-40",
+                  dl?.status === 'done' ? 'border-emerald-500/50 text-emerald-400 hover:border-red/60 hover:text-red' :
+                  dl?.status === 'downloading' || dl?.status === 'queued' ? 'border-accent bg-accent/15 text-accent' :
+                  'border-line bg-elevated text-ink hover:border-accent hover:text-accent')}
+                aria-label={dl?.status === 'done' ? 'Hapus unduhan' : dl?.status === 'downloading' || dl?.status === 'queued' ? 'Batalkan unduhan' : 'Unduh episode'}>
+                {dl?.status === 'done' ? <CheckCircleIcon size={15} /> :
+                 dl?.status === 'downloading' ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> :
+                 dl?.status === 'queued' ? <XIcon size={15} /> :
+                 <DownloadIcon size={15} />}
+              </button>
+            </div>
           </div>
 
-          <div className="cr-container relative z-10 pb-6 px-4">
-            <div className="flex gap-2 mb-3 flex-wrap">
-              {anime.genreList?.slice(0, 3).map((g, idx) => (
-                <span key={idx} className="px-2.5 py-1 bg-primary/10 text-primary border border-primary/25 rounded-md text-[10px] font-black uppercase tracking-wider">
-                  {typeof g === 'object' ? g.title : g}
-                </span>
+          {dl && (dl.status === 'downloading' || dl.status === 'queued') && (
+            <div className="mb-5 -mt-3">
+              <div className="h-1 w-full overflow-hidden rounded-full bg-elevated">
+                <div className="h-full rounded-full bg-accent transition-all duration-300"
+                  style={{ width: `${dl.totalSize > 0 ? Math.min(100, Math.round((dl.done / dl.totalSize) * 100)) : 5}%` }} />
+              </div>
+              <p className="mt-1.5 text-[11px] font-medium text-muted">
+                {dl.status === 'queued'
+                  ? `Menunggu unduhan lain selesai… (Episode ${dl.epNumber})`
+                  : `Mengunduh Episode ${dl.epNumber}… ${dl.totalSize > 0 ? `${Math.min(100, Math.round((dl.done / dl.totalSize) * 100))}%` : ''}`}
+              </p>
+            </div>
+          )}
+
+          {anime.synopsis && (
+            <div className="mb-5">
+              <h3 className="mb-2 text-sm font-bold text-ink">Sinopsis</h3>
+              <p className="text-sm leading-relaxed text-muted">{anime.synopsis}</p>
+            </div>
+          )}
+
+          {anime.genres?.length > 0 && (
+            <div className="mb-5 flex flex-wrap gap-2">
+              {anime.genres.map(g => (
+                <Link key={g} to={`/browse?genre=${encodeURIComponent(g)}`}
+                  className="rounded-full border border-line bg-elevated px-3 py-1 text-xs font-medium text-muted hover:border-accent hover:text-accent">{g}</Link>
               ))}
             </div>
-            <h1 data-testid="anime-detail-title" className="text-2xl md:text-4xl font-black text-text mb-3 leading-tight tracking-tight">
-              {anime.title}
-            </h1>
-
-            <div className="flex items-center gap-2 text-[12px] font-bold text-text-secondary mb-6 flex-wrap">
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-50 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-500/30">
-                <Star size={12} className="fill-current" /> {anime.rating}
-              </span>
-              <span className="px-2.5 py-1 rounded-md bg-surface border border-border">
-                {anime.year}
-              </span>
-              <span className="px-2.5 py-1 rounded-md bg-primary/10 text-primary border border-primary/25 uppercase tracking-wider text-[10px]">
-                {displaySource}
-              </span>
-              {isOngoing ? (
-                <span data-testid="anime-detail-status-ongoing" className="flex items-center gap-1 px-2.5 py-1 bg-yellow-50 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-500/30 rounded-md">
-                  <Clock size={11} /> Ongoing
-                </span>
-              ) : (
-                <span data-testid="anime-detail-status-completed" className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 rounded-md">
-                  <CheckCircle2 size={11} /> Completed
-                </span>
-              )}
-            </div>
-
-            {/* Aksi Detail */}
-            <div className="flex flex-wrap gap-3">
-              <button
-                data-testid="anime-detail-tonton-btn"
-                onClick={() => {
-                  setHasStartedPlaying(true);
-                  if (anime && currentEpisode) {
-                    const userId = getCurrentUserId();
-                    saveHistory(userId, {
-                      id: anime.id,
-                      title: anime.title,
-                      poster: anime.poster || "",
-                      episode: currentEpisode.number || (currentEpisode.title?.match(/\d+/) || ['1'])[0],
-                      source: activeSource,
-                      progressSeconds: 0,
-                    }).catch(() => {});
-                  }
-                }}
-                className="inline-flex items-center gap-2.5 px-7 py-3.5 bg-primary hover:bg-primary-dark text-white rounded-2xl font-bold shadow-lg shadow-primary/40 active:scale-95 transition-all text-sm"
-              >
-                <Play size={18} className="fill-white" /> Tonton Episode 1
-              </button>
-              <button
-                data-testid="anime-detail-unduh-batch-btn"
-                onClick={() => handleDownloadBatch()}
-                className="inline-flex items-center gap-2.5 px-7 py-3.5 bg-surface hover:bg-surface-highlight text-text border border-border rounded-2xl font-bold shadow-sm active:scale-95 transition-all text-sm"
-              >
-                <Download size={16} /> Unduh Batch
-              </button>
-            </div>
-            <div className="mt-4">
-              <WatchPartyControls
-                anime={anime}
-                currentEpisode={currentEpisode}
-                activeSource={activeSource}
-                playerRef={playerRef}
-                onEpisodeIdChange={(epId) => {
-                  const ep = anime?.episodes?.find((e) => e.id === epId);
-                  if (ep) setCurrentEpisode(ep);
-                }}
-              />
-            </div>
-          </div>
-        </div>
-        
-        {/* Content Details & Episode lists */}
-        <div className="cr-container mt-6 px-4">
-          <SynopsisBlock text={anime.synopsis} />
-
-          {/* Episode List Section */}
-          <div className="episodes-section border-t border-border pt-6">
-            <div className="flex justify-between items-center mb-4 gap-3 flex-wrap">
-              <h2 className="text-[15px] font-black uppercase tracking-[0.18em] text-text flex items-center gap-2.5">
-                <span className="w-1.5 h-5 rounded-full bg-primary" />
-                Daftar Episode
-                <span className="ml-1 inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-full bg-primary/15 text-primary text-[11px] font-black normal-case tracking-normal border border-primary/25">
-                  {anime.episodes.length}
-                </span>
-              </h2>
-
-              <div className="flex gap-2">
-                <button
-                  data-testid="episode-layout-toggle"
-                  onClick={() => setEpisodeLayout((prev) => (prev === 'horizontal' ? 'vertical' : 'horizontal'))}
-                  className="w-10 h-10 rounded-full border border-border bg-surface hover:bg-surface-highlight text-text-secondary flex items-center justify-center transition active:scale-95"
-                  title="Ubah Layout"
-                >
-                  {episodeLayout === 'horizontal' ? <List size={18} /> : <LayoutGrid size={18} />}
-                </button>
-                <button
-                  data-testid="episode-sort-toggle"
-                  onClick={() => setEpisodeSort((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
-                  className="px-4 h-10 rounded-full border border-border bg-surface hover:bg-surface-highlight text-[12px] font-bold text-text-secondary flex items-center gap-1.5 transition active:scale-95"
-                >
-                  <Filter size={13} />
-                  {episodeSort === 'asc' ? 'Terlama' : 'Terbaru'}
-                </button>
-              </div>
-            </div>
-
-            {/* Search filter input */}
-            {anime.episodes.length > 6 && (
-              <div className="relative mb-5">
-                <Search size={15} className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-                <input
-                  data-testid="episode-search-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={episodeSearch}
-                  onChange={(e) => setEpisodeSearch(e.target.value)}
-                  placeholder="Cari episode..."
-                  className="w-full pl-11 pr-10 h-11 rounded-2xl border border-border bg-surface text-[13px] font-bold text-text placeholder:text-text-muted placeholder:font-medium focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/15 transition"
-                />
-                {episodeSearch && (
-                  <button
-                    onClick={() => setEpisodeSearch('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-surface-highlight hover:bg-border text-text-muted text-[11px] font-black flex items-center justify-center transition"
-                    aria-label="Bersihkan pencarian"
-                  >
-                    x
-                  </button>
-                )}
-              </div>
-            )}
-
-            {(() => {
-              const filtered = episodeSearch.trim()
-                ? sortedEpisodes.filter((ep) =>
-                    String(ep.number || '').includes(episodeSearch.trim()) ||
-                    formatEpisodeTitle(ep.title, anime?.title).toLowerCase().includes(episodeSearch.trim().toLowerCase())
-                  )
-                : sortedEpisodes;
-
-              if (filtered.length === 0) {
-                return (
-                  <div className="text-center py-10 px-4 bg-surface rounded-2xl border border-border">
-                    <p className="text-[13px] font-bold text-text-secondary">Tidak ada episode yang cocok.</p>
-                    <p className="text-[11px] text-text-muted mt-1">Coba kata kunci atau nomor episode lain.</p>
-                  </div>
-                );
-              }
-
-              return episodeLayout === 'horizontal' ? (
-                <div className="flex gap-3 overflow-x-auto no-scrollbar pb-4 -mx-4 px-4">
-                  {filtered.map((ep) => {
-                    const isCur = currentEpisode.id === ep.id;
-                    return (
-                      <button
-                        key={ep.id}
-                        onClick={() => {
-                          setCurrentEpisode(ep);
-                          setHasStartedPlaying(true);
-                        }}
-                        className={`w-40 shrink-0 px-4 py-3.5 rounded-2xl text-left transition-all flex flex-col justify-between min-h-[92px] active:scale-95 relative overflow-hidden ${
-                          isCur
-                            ? 'bg-primary text-white border-2 border-primary-dark shadow-lg shadow-primary/35'
-                            : 'bg-surface border border-border hover:border-primary/40 text-text'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className={`text-[10px] font-black uppercase tracking-wider ${isCur ? 'text-white/85' : 'text-text-muted'}`}>
-                            Eps {ep.number}
-                          </span>
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center ${isCur ? 'bg-white/25' : 'bg-surface-highlight'}`}>
-                            <Play size={9} className={isCur ? 'text-white fill-white' : 'text-text-muted fill-current'} />
-                          </span>
-                        </div>
-                        <span className="text-[13px] font-bold line-clamp-2 leading-snug mt-1.5">
-                          {formatEpisodeTitle(ep.title, anime?.title)}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {filtered.map((ep) => {
-                    const isCur = currentEpisode.id === ep.id;
-                    return (
-                      <button
-                        key={ep.id}
-                        onClick={() => {
-                          setCurrentEpisode(ep);
-                          setHasStartedPlaying(true);
-                        }}
-                        className={`px-4 py-3 rounded-2xl flex items-center justify-between transition-all active:scale-[0.98] ${
-                          isCur
-                            ? 'bg-primary text-white border-2 border-primary-dark shadow-md shadow-primary/30'
-                            : 'bg-surface border border-border hover:border-primary/40 text-text'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center text-[13px] font-black ${
-                            isCur ? 'bg-white/25 text-white' : 'bg-surface-highlight text-text-muted'
-                          }`}>
-                            {ep.number}
-                          </span>
-                          <span className="text-[13px] font-bold truncate text-left">
-                            {formatEpisodeTitle(ep.title, anime?.title)}
-                          </span>
-                        </div>
-                        <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
-                          isCur ? 'bg-white/25' : 'bg-surface-highlight'
-                        }`}>
-                          <Play size={12} className={isCur ? 'fill-white text-white' : 'opacity-50'} />
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-        {showDownloadModal && (
-          <div
-            data-testid="unduh-episode-modal"
-            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in"
-            onClick={() => setShowDownloadModal(false)}
-          >
-            <div
-              className="bg-surface border-t sm:border border-border rounded-t-3xl sm:rounded-3xl px-6 pt-6 pb-8 max-w-md w-full shadow-2xl space-y-5 max-h-[80vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* drag handle (mobile) */}
-              <div className="sm:hidden mx-auto -mt-2 mb-3 w-10 h-1.5 rounded-full bg-text-muted/30" />
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-primary/15 text-primary flex items-center justify-center border border-primary/25">
-                  <Download size={22} />
-                </div>
-                <div className="space-y-0.5 flex-1 min-w-0">
-                  <h3 className="text-lg font-black text-text leading-tight">Unduh Episode {currentEpisode?.number || ''}</h3>
-                  <p className="text-[12px] text-text-secondary font-medium leading-relaxed">
-                    Pilih kualitas video. Unduhan jalan di latar belakang.
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2.5">
-                {(() => {
-                  const groups = groupDownloadByResolution();
-                  if (!groups.length) {
-                    return (
-                      <div className="text-center text-[13px] text-text-secondary py-6 bg-surface-highlight rounded-2xl border border-border">
-                        Tidak ada link download untuk episode ini.
-                      </div>
-                    );
-                  }
-                  return groups.map((g, idx) => {
-                    const isMax = idx === 0;
-                    const is4K = g.resolution === '4K';
-                    const sourceName = g.hosts[0]?.host || 'Server';
-                    return (
-                      <div
-                        key={g.resolution}
-                        className={`w-full rounded-2xl border overflow-hidden transition-all ${
-                          isMax
-                            ? 'bg-gradient-to-br from-primary to-primary-dark border-primary-dark text-white shadow-lg shadow-primary/30'
-                            : 'bg-surface-highlight border-border text-text'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between px-4 pt-4 pb-2.5 gap-3">
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <span className={`flex items-center justify-center w-12 h-12 rounded-xl text-[12px] font-black shrink-0 ${
-                              isMax
-                                ? 'bg-white/25 text-white'
-                                : (is4K ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300' : 'bg-surface text-text border border-border')
-                            }`}>
-                              {g.resolution}
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-[14px] font-black leading-snug flex items-center gap-2">
-                                {g.resolution}
-                                {is4K && <span className="text-[10px] uppercase tracking-wider opacity-80 font-bold">Ultra HD</span>}
-                                {isMax && <span className="text-[9px] uppercase tracking-[0.18em] font-black bg-white/25 px-1.5 py-0.5 rounded">Maks</span>}
-                              </span>
-                              <span className={`text-[11px] font-semibold mt-0.5 truncate ${isMax ? 'text-white/85' : 'text-text-muted'}`}>
-                                {sourceName} · {g.hosts.length} mirror
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          data-testid="download-quality-option"
-                          onClick={() => {
-                            const HOST_PRIORITY = ['kdrive', 'iino', 'komari', 'asuna', 'kitasan', 'chisato', 'huntersekai', 'mp4upload', 'krakenfiles', 'gofile', 'mirror', 'pdrain', 'pixeldrain'];
-                            const ranked = [...g.hosts].sort((a, b) => {
-                              const ra = HOST_PRIORITY.findIndex((h) => (a.host || '').toLowerCase().includes(h));
-                              const rb = HOST_PRIORITY.findIndex((h) => (b.host || '').toLowerCase().includes(h));
-                              return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
-                            });
-                            startBackgroundDownload(ranked.map((r) => r.url), g.resolution);
-                          }}
-                          className={`w-full flex items-center justify-center gap-2 px-4 py-3 text-[12px] font-black uppercase tracking-[0.18em] transition active:scale-[0.98] ${
-                            isMax
-                              ? 'bg-white/20 hover:bg-white/30 text-white'
-                              : 'bg-primary hover:bg-primary-dark text-white'
-                          }`}
-                        >
-                          <Download size={15} strokeWidth={2.5} />
-                          Download
-                        </button>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-              <button
-                data-testid="unduh-batch-modal-close"
-                onClick={() => setShowDownloadModal(false)}
-                className="w-full bg-surface-highlight hover:bg-border text-text font-bold py-3.5 rounded-2xl transition active:scale-95 text-sm"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Unduh BATCH Pop-up Dialog (full series, beda dari per-episode) */}
-        {showBatchModal && (
-          <div data-testid="unduh-batch-full-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-white border border-zinc-200 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-5">
-              <div className="text-center space-y-2">
-                <h3 className="text-lg font-black text-black">Unduh Batch Seri</h3>
-                <p className="text-xs text-zinc-500 font-medium">
-                  Seluruh episode dalam satu paket per resolusi. File besar — pastikan jaringan stabil. Hanya tersedia bila seri menyediakan batch.
-                </p>
-              </div>
-              <div className="max-h-[60vh] overflow-y-auto -mx-2 px-2 space-y-2">
-                {batchLoading && (
-                  <div className="flex flex-col items-center justify-center py-6 gap-2">
-                    <div className="w-8 h-8 border-4 border-[#c68a4e] border-t-transparent rounded-full animate-spin" />
-                    <span className="text-xs font-bold text-zinc-500 tracking-wider uppercase">Memuat batch...</span>
-                  </div>
-                )}
-                {!batchLoading && batchOptions !== null && batchOptions.length === 0 && (
-                  <div className="text-center text-xs text-zinc-500 py-6 px-3">
-                    Batch tidak tersedia untuk seri ini.<br/>
-                    {activeSource !== 'otakudesu' && (
-                      <span className="text-[10px] text-zinc-400">Saat ini batch hanya tersedia dari Otakudesu.</span>
-                    )}
-                  </div>
-                )}
-                {!batchLoading && batchOptions !== null && batchOptions.length > 0 && (() => {
-                  // Group batch options by resolution
-                  const buckets = new Map();
-                  for (const o of batchOptions) {
-                    const q = String(o.quality || '').toLowerCase();
-                    let key = '?';
-                    if (q.includes('1080p')) key = '1080p';
-                    else if (q.includes('720p')) key = '720p';
-                    else if (q.includes('480p')) key = '480p';
-                    else if (q.includes('360p')) key = '360p';
-                    else if (q.includes('4k') || q.includes('2160p')) key = '4K';
-                    if (!buckets.has(key)) buckets.set(key, []);
-                    buckets.get(key).push(o);
-                  }
-                  const order = ['4K', '1080p', '720p', '480p', '360p', '?'];
-                  return order
-                    .filter((k) => buckets.has(k))
-                    .map((k, idx) => {
-                      const isMax = idx === 0;
-                      const hosts = buckets.get(k);
-                        const HOST_PRIORITY = ['kdrive', 'iino', 'komari', 'asuna', 'kitasan', 'chisato', 'huntersekai', 'mp4upload', 'krakenfiles', 'gofile', 'mirror', 'pdrain', 'pixeldrain'];
-                      const ranked = [...hosts].sort((a, b) => {
-                        const ra = HOST_PRIORITY.findIndex((h) => (a.host || '').toLowerCase().includes(h));
-                        const rb = HOST_PRIORITY.findIndex((h) => (b.host || '').toLowerCase().includes(h));
-                        return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
-                      });
-                      const size = hosts[0]?.size || '';
-                      return (
-                        <button
-                          key={k}
-                          data-testid="batch-quality-option"
-                          onClick={() => {
-                            startBackgroundDownload(ranked.map((r) => r.url), `BATCH-${k}`);
-                            setShowBatchModal(false);
-                          }}
-                          className={`w-full flex justify-between items-center px-4 py-3.5 rounded-2xl border transition active:scale-95 text-left ${
-                            isMax
-                              ? 'bg-gradient-to-br from-[#c68a4e] to-[#a4682f] border-[#a4682f] text-white shadow-lg shadow-[#c68a4e]/30'
-                              : 'bg-zinc-50 border-zinc-200 text-zinc-800 hover:bg-zinc-100'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className={`flex items-center justify-center w-12 h-12 rounded-xl text-xs font-black ${
-                              isMax ? 'bg-white/25 text-white' : 'bg-zinc-200 text-zinc-700'
-                            }`}>
-                              {k}
-                            </span>
-                            <div className="flex flex-col">
-                              <span className="text-sm font-bold">Batch {k}</span>
-                              <span className={`text-[10px] ${isMax ? 'text-white/80' : 'text-zinc-500'} font-semibold`}>
-                                {size ? `${size} • ` : ''}{hosts.length} mirror
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end">
-                            {isMax && <span className="text-[9px] uppercase tracking-wider font-black mb-0.5">Maksimal</span>}
-                            <Download size={18} className={isMax ? 'text-white' : 'text-[#c68a4e]'} />
-                          </div>
-                        </button>
-                      );
-                    });
-                })()}
-              </div>
-              <button
-                data-testid="unduh-batch-full-close"
-                onClick={() => setShowBatchModal(false)}
-                className="w-full bg-zinc-900 hover:bg-zinc-800 text-white font-bold py-3 rounded-full shadow-md transition active:scale-95 cursor-pointer text-sm"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // --- R5. CUSTOM VIDEO PLAYER (NANIMEID THEME) ---
-  return (
-    <div className="video-player-container pb-24 bg-[#fafafa] text-[#18181b]">
-      {/* Video Player Box Area */}
-      <div 
-        data-testid="nanimeid-player-skin"
-        className="custom-player-wrapper relative w-full bg-black flex items-center justify-center z-10 overflow-hidden" 
-        style={{ aspectRatio: '16/9', maxHeight: '100vh' }} 
-        ref={playerContainerRef}
-      >
-        {isVideoLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-20 backdrop-blur-sm">
-            <div className="relative w-16 h-16 flex items-center justify-center mb-4">
-              <div className="absolute inset-0 border-4 border-white/10 rounded-full"></div>
-              <div className="absolute inset-0 border-4 border-[#c68a4e] border-t-transparent rounded-full animate-spin"></div>
-            </div>
-            <span className="text-xs font-bold tracking-wider text-white">MEMUAT STREAM ({activeSource.toUpperCase()})</span>
-            {/* Loading toast: pojok kiri atas, kecil, transparan, dengan
-                spinner mini supaya tidak mengganggu tampilan player. */}
-            <div
-              data-testid="stream-loading-toast"
-              className="absolute top-3 left-3 max-w-[200px] bg-black/40 backdrop-blur-md text-white rounded-xl px-3 py-2 shadow-lg border border-white/15 animate-fade-in-up"
-            >
-              <div className="flex items-center gap-2">
-                <span className="relative w-3.5 h-3.5 shrink-0 inline-flex">
-                  <span className="absolute inset-0 border-[2px] border-white/25 rounded-full" />
-                  <span className="absolute inset-0 border-[2px] border-[#c68a4e] border-t-transparent rounded-full animate-spin" />
-                </span>
-                <p className="text-[10px] font-semibold leading-snug">
-                  Tunggu 1-60 detik, sabar ya
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : videoError ? (
-          <div className="w-full h-full flex flex-col items-center justify-center text-white bg-zinc-950 gap-4 p-8 text-center z-20 absolute inset-0">
-            <CloudOff size={32} className="text-red-500" />
-            <span className="text-sm font-bold text-red-500">Gagal Memutar Video</span>
-            <span className="text-xs text-zinc-400 max-w-sm">{videoError}</span>
-            <button onClick={() => setVideoError(null)} className="px-5 py-2 bg-zinc-800 rounded-lg text-xs font-bold cursor-pointer">Coba Lagi</button>
-          </div>
-        ) : streamUrl ? (
-          <>
-            {/* Routing player:
-                - mp4/m3u8/proxy → custom <video> player (player kustom).
-                - URL embed (mis. iframe ke embed.io / blogger / videohide) →
-                  iframe sebagai fallback supaya tidak "MEDIA_ELEMENT_ERROR
-                  Format error" yang muncul kalau <video> dipaksa baca HTML.
-                Untuk Otakudesu, backend /extract-stream akan converted ke
-                mp4/m3u8 jadi cabang custom player jalan; kalau gagal kita
-                jatuh ke iframe (worst case tetap bisa nonton). */}
-            {(!streamUrl.includes('.mp4') && !streamUrl.includes('.m3u8') && !streamUrl.includes('stream-proxy') && !streamUrl.includes('extract-stream') && streamUrl.startsWith('http')) ? (
-              <>
-                <iframe
-                  src={getIframeUrl()}
-                  className="absolute inset-0 w-full h-full border-0 bg-black z-10"
-                  allowFullScreen
-                  allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                  referrerPolicy="no-referrer"
-                  {...(activeSource === 'kuramanime'
-                    ? { sandbox: "allow-scripts allow-same-origin allow-forms allow-presentation" }
-                    : {})}
-                ></iframe>
-                {/* Tombol custom (back + download) di pojok kiri-atas saja
-                    supaya tidak menutupi control native player (fullscreen,
-                    play/pause, quality picker) yang biasanya di pojok kanan
-                    atau di bilah bawah. */}
-                <div className="absolute top-3 left-3 z-30 pointer-events-auto flex items-center gap-2">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); navigate(-1); }}
-                    className="w-11 h-11 bg-black/60 hover:bg-black/80 rounded-2xl flex items-center justify-center text-white backdrop-blur-md transition border border-white/20 active:scale-95 shadow-md"
-                    aria-label="Kembali"
-                  >
-                    <ArrowLeft size={20} />
-                  </button>
-                </div>
-                {/* CATATAN: jangan tambahkan tombol fullscreen kustom di sini.
-                    Player bawaan Nekopoi/Kuramanime sudah punya tombol
-                    fullscreen sendiri yang otomatis mendeteksi device dan
-                    melakukan request fullscreen API yang sesuai. Tombol kustom
-                    di luar iframe akan menutupi/mengganggu kontrol native dan
-                    membuat fullscreen tidak berfungsi seperti yang
-                    diharapkan. */}
-              </>
-            ) : (
-              /* Native Video player with custom controls overlay */
-              <>
-                <video
-                  ref={playerRef}
-                  src={streamUrl}
-                  autoPlay
-                  playsInline
-                  crossOrigin="anonymous"
-                  onError={handleVideoError}
-                  onTimeUpdate={(e) => {
-                    handleProgress({ played: e.target.currentTime / (duration || 1) });
-                  }}
-                  onLoadedMetadata={onLoadedMetadata}
-                  onPlay={() => setPlaying(true)}
-                  onPause={() => setPlaying(false)}
-                  onPlaying={() => setPlaying(true)}
-                  onEnded={handleVideoEnd}
-                  onClick={handlePlayerClick}
-                  onTouchStart={handleTouchStart}
-                  onTouchMove={handleTouchMove}
-                  onTouchEnd={handleTouchEnd}
-                  style={{ filter: `brightness(${brightness})` }}
-                  className="absolute inset-0 w-full h-full border-0 bg-black object-contain z-10 cursor-pointer"
-                >
-                  Browser Anda tidak mendukung tag video.
-                </video>
-
-                {/* Indikator gesture volume/kecerahan */}
-                {gestureHint && (
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none bg-black/60 backdrop-blur-md rounded-2xl px-5 py-4 flex flex-col items-center gap-2 min-w-[120px]">
-                    <span className="text-xs font-bold tracking-wider text-white uppercase">
-                      {gestureHint.type === 'volume' ? 'Volume' : 'Kecerahan'}
-                    </span>
-                    <div className="w-24 h-1.5 bg-white/20 rounded-full overflow-hidden">
-                      <div className="h-full bg-[#c68a4e]" style={{ width: `${Math.round(gestureHint.value * 100)}%` }} />
-                    </div>
-                    <span className="text-sm font-black text-white">{Math.round(gestureHint.value * 100)}%</span>
-                  </div>
-                )}
-
-                {/* Lock Screen overlay */}
-                {(showControls || isLocked) && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setIsLocked(!isLocked); resetControlsTimeout(); }}
-                    className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white pointer-events-auto absolute left-4 top-1/2 -translate-y-1/2 z-40 transition-all cursor-pointer border border-white/10"
-                  >
-                    {isLocked ? <Lock size={22} className="text-[#c68a4e]" /> : <Unlock size={22} />}
-                  </button>
-                )}
-
-                {/* Player Controls overlay */}
-                <div 
-                  className={`player-overlay absolute inset-0 z-20 flex flex-col justify-between w-full h-full pointer-events-none transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}
-                >
-                  <div 
-                    className="absolute inset-0 z-0 pointer-events-auto cursor-pointer"
-                    onClick={handlePlayerClick}
-                  />
-
-                  {/* Top Bar control overlay */}
-                  <div className="overlay-top flex justify-between items-start pointer-events-auto z-10 p-4 gap-2">
-                    <button
-                      onClick={() => navigate(-1)}
-                      className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-[#c68a4e] hover:text-black transition cursor-pointer border border-white/10 shrink-0"
-                    >
-                      <ArrowLeft size={22} />
-                    </button>
-                    <div className="flex-1 min-w-0 pt-1.5">
-                      <h4 className="font-bold text-[15px] text-white truncate leading-tight">{anime.title}</h4>
-                      <p className="text-[11px] text-zinc-300 font-semibold mt-0.5">{currentEpisode.title}</p>
-                    </div>
-                    {/* Tombol Download di top bar player DIHAPUS — sudah ada
-                        di action row di luar player (Favorit / Unduh / Lapor),
-                        sesuai permintaan user. */}
-                    {/* Episode list toggle (kanan atas) - daftar episode bottom sheet */}
-                    {anime.episodes && anime.episodes.length > 1 && (
-                      <button
-                        data-testid="player-episode-list-btn"
-                        onClick={(e) => { e.stopPropagation(); setShowEpisodeOverlay(v => !v); resetControlsTimeout(); }}
-                        className="px-3.5 h-12 rounded-full bg-black/50 backdrop-blur-md flex items-center gap-1.5 text-white hover:bg-[#c68a4e] hover:text-black transition cursor-pointer border border-white/10 shrink-0"
-                        title="Daftar episode"
-                      >
-                        <List size={18} />
-                        <span className="text-xs font-bold whitespace-nowrap">EP {currentEpisode.number}</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Daftar Episode in-player — bottom sheet ala nanimeid:
-                      grid kotak padat, item current di-highlight, scrollable.
-                      Konsisten dengan menu Resolusi/Kecepatan. */}
-                  {showEpisodeOverlay && anime.episodes && anime.episodes.length > 1 && (
-                    <div
-                      className="fixed inset-0 z-[60] flex items-end justify-center pointer-events-auto"
-                      onClick={(e) => { e.stopPropagation(); setShowEpisodeOverlay(false); }}
-                      data-testid="player-episode-list-overlay"
-                    >
-                      <div className="absolute inset-0 bg-black/75 backdrop-blur-md" />
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="relative w-full max-w-md bg-[#101013] rounded-t-[28px] border-t border-white/10 shadow-2xl animate-fade-in"
-                        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-                      >
-                        <div className="mx-auto mt-3 mb-1 w-10 h-1.5 rounded-full bg-white/25" />
-                        <div className="px-5 pt-3 pb-3 flex items-center justify-between gap-3 border-b border-white/10">
-                          <div>
-                            <h4 className="text-white font-black text-[15px] tracking-tight">Daftar Episode</h4>
-                            <p className="text-white/55 text-[12px] font-medium mt-0.5">{anime.episodes.length} episode tersedia</p>
-                          </div>
-                          <button
-                            onClick={() => setShowEpisodeOverlay(false)}
-                            className="w-9 h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.15] text-white flex items-center justify-center transition"
-                            aria-label="Tutup"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-5 sm:grid-cols-6 gap-1.5 px-3 py-4 max-h-[55vh] overflow-y-auto">
-                          {anime.episodes.map((ep) => {
-                            const isCurrent = currentEpisode && ep.id === currentEpisode.id;
-                            return (
-                              <button
-                                key={ep.id}
-                                onClick={() => {
-                                  setCurrentEpisode(ep);
-                                  setShowEpisodeOverlay(false);
-                                }}
-                                className={`relative aspect-square rounded-lg flex items-center justify-center font-black text-[15px] transition active:scale-[0.92] ${
-                                  isCurrent
-                                    ? 'bg-primary text-white shadow-md shadow-primary/30 ring-2 ring-primary-light'
-                                    : 'bg-white/[0.06] text-white hover:bg-primary/30 border border-white/[0.06]'
-                                }`}
-                              >
-                                {ep.number}
-                                {isCurrent && (
-                                  <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-primary-light border-2 border-[#101013]" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Skip Intro — nanimeid plek-ketiplek: muncul detik
-                      5-90 di pojok kanan bawah, chip pill "Lewati Intro »",
-                      sekali klik lompat +85 detik dan hilang sampai episode
-                      ganti. Untuk movie tidak dimunculkan. */}
-                  {(() => {
-                    const isMovieType = anime?.episodes?.length <= 1 ||
-                      anime?.genreList?.some(g => (typeof g === 'object' ? g.title : g)?.toLowerCase() === 'movie');
-                    if (isMovieType || skipIntroDismissed) return null;
-                    const SKIP_INTRO_START = 5;   // detik mulai tampil
-                    const SKIP_INTRO_END = 90;    // detik akhir tampil
-                    const SKIP_AMOUNT = 85;        // lompatan saat diklik (nanimeid)
-                    if (currentTime > SKIP_INTRO_START && currentTime < SKIP_INTRO_END) {
-                      return (
-                        <div className="skip-btn-container absolute bottom-20 right-4 z-30 pointer-events-auto">
-                          <button
-                            data-testid="player-skip-intro-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (playerRef.current) {
-                                const target = Math.min((playerRef.current.currentTime || 0) + SKIP_AMOUNT, (duration || 0) - 1);
-                                playerRef.current.currentTime = target;
-                              }
-                              setSkipIntroDismissed(true);
-                            }}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-black/55 hover:bg-black/75 text-white backdrop-blur-md rounded-full text-[12.5px] font-bold border border-white/20 transition active:scale-95 shadow-lg cursor-pointer"
-                          >
-                            Lewati Intro
-                            <ChevronRight size={14} strokeWidth={3} />
-                          </button>
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
-
-                  {/* Skip Outro / Next Episode Button (fitur SKIP INTRO dihapus). */}
-                  {(() => {
-                    const isMovieType = anime?.episodes?.length <= 1 ||
-                      anime?.genreList?.some(g => (typeof g === 'object' ? g.title : g)?.toLowerCase() === 'movie');
-                    if (isMovieType) return null;
-
-                    if (currentTime >= 900 && !outroSkipped) {
-                      return (
-                        <div className="skip-btn-container absolute bottom-28 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex flex-col gap-2 items-center">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (playerRef.current && duration > 0) {
-                                playerRef.current.currentTime = Math.max(0, duration - 30);
-                              }
-                              setOutroSkipped(true);
-                              showToast("Outro dilewati");
-                            }}
-                            className="px-5 py-2.5 bg-white/15 hover:bg-[#c68a4e] text-white hover:text-black backdrop-blur-md rounded-2xl text-xs font-bold border border-white/25 transition-all active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
-                          >
-                            SKIP OUTRO <RotateCw size={14} />
-                          </button>
-                          {hasNextEpisode() && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                playNextEpisode();
-                              }}
-                              className="px-5 py-2.5 bg-[#c68a4e] hover:bg-[#a4682f] text-black backdrop-blur-md rounded-2xl text-xs font-bold border border-[#a4682f] transition-all active:scale-95 flex items-center gap-2 shadow-lg cursor-pointer"
-                            >
-                              EP SELANJUTNYA <SkipForward size={14} fill="currentColor" />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    }
-
-                    return null;
-                  })()}
-
-                  {/* Central Playback Controls */}
-                  {!isLocked && (
-                    <div className="absolute inset-0 flex items-center justify-center gap-6 pointer-events-none z-30">
-                      {/* Prev Episode */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playPrevEpisode();
-                          resetControlsTimeout();
-                        }}
-                        disabled={!hasPrevEpisode()}
-                        className="w-12 h-12 rounded-full bg-black/40 hover:bg-black/60 active:scale-90 flex items-center justify-center text-white backdrop-blur-md transition-all cursor-pointer disabled:opacity-30 disabled:pointer-events-none border border-white/10 pointer-events-auto"
-                        title="Episode Sebelumnya"
-                      >
-                        <SkipBack size={20} fill="currentColor" />
-                      </button>
-
-                      {/* Rewind 10s */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (playerRef.current) {
-                            const newTime = Math.max(playerRef.current.currentTime - 10, 0);
-                            playerRef.current.currentTime = newTime;
-                            setCurrentTime(newTime);
-                            setPlayed(newTime / duration);
-                          }
-                          resetControlsTimeout();
-                        }}
-                        className="w-12 h-12 rounded-full bg-black/40 hover:bg-black/60 active:scale-90 flex items-center justify-center text-white backdrop-blur-md transition-all cursor-pointer border border-white/10 pointer-events-auto"
-                        title="Mundur 10s"
-                      >
-                        <RotateCcw size={20} />
-                      </button>
-
-                      {/* Big Play/Pause Toggle */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          togglePlay();
-                          resetControlsTimeout();
-                        }}
-                        className="w-16 h-16 rounded-full bg-[#c68a4e] hover:bg-[#a4682f] active:scale-90 flex items-center justify-center text-black shadow-lg shadow-[#c68a4e]/35 transition-all cursor-pointer border border-[#c68a4e] pointer-events-auto"
-                        title={playing ? "Pause" : "Play"}
-                      >
-                        {playing ? <Pause size={28} fill="black" /> : <Play size={28} fill="black" className="ml-1" />}
-                      </button>
-
-                      {/* Forward 10s */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (playerRef.current) {
-                            const newTime = Math.min(playerRef.current.currentTime + 10, duration);
-                            playerRef.current.currentTime = newTime;
-                            setCurrentTime(newTime);
-                            setPlayed(newTime / duration);
-                          }
-                          resetControlsTimeout();
-                        }}
-                        className="w-12 h-12 rounded-full bg-black/40 hover:bg-black/60 active:scale-90 flex items-center justify-center text-white backdrop-blur-md transition-all cursor-pointer border border-white/10 pointer-events-auto"
-                        title="Maju 10s"
-                      >
-                        <RotateCw size={20} />
-                      </button>
-
-                      {/* Next Episode */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playNextEpisode();
-                          resetControlsTimeout();
-                        }}
-                        disabled={!hasNextEpisode()}
-                        className="w-12 h-12 rounded-full bg-black/40 hover:bg-black/60 active:scale-90 flex items-center justify-center text-white backdrop-blur-md transition-all cursor-pointer disabled:opacity-30 disabled:pointer-events-none border border-white/10 pointer-events-auto"
-                        title="Episode Selanjutnya"
-                      >
-                        <SkipForward size={20} fill="currentColor" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Bottom Bar control overlay (Mockup player-nanimeid.jpg layout) */}
-                  <div className="overlay-bottom p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent pointer-events-auto z-10">
-                    
-                    {/* Time indicator and seekbar slider */}
-                    <div className="flex items-center gap-3 mb-2.5">
-                      <span className="text-[10px] text-white/95 font-bold font-mono">{formatTime(currentTime)}</span>
-                      <div 
-                        className="relative flex-1 h-3 flex items-center group cursor-pointer"
-                        onMouseDown={handleSeekMouseDown}
-                        onMouseUp={handleSeekMouseUp}
-                        onTouchStart={handleSeekMouseDown}
-                        onTouchEnd={handleSeekMouseUp}
-                      >
-                        <input 
-                          data-testid="player-progress-bar"
-                          type="range" 
-                          min={0} 
-                          max={1} 
-                          step="any" 
-                          value={played} 
-                          onChange={handleSeekChange}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 m-0 p-0"
-                        />
-                        <div className="absolute left-0 w-full h-1 bg-white/20 rounded-full overflow-hidden pointer-events-none">
-                          <div 
-                            className="h-full bg-[#c68a4e] transition-all"
-                            style={{ width: `${played * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-[10px] text-white/95 font-bold font-mono">{formatTime(duration)}</span>
-                    </div>
-
-                    {/* Controls Row */}
-                    <div className="flex justify-between items-center">
-                      {/* Prev - Play/Pause - Next dual controls adjacent */}
-                      <div className="flex gap-3 items-center">
-                        <button
-                          data-testid="player-prev-episode"
-                          onClick={playPrevEpisode}
-                          className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-[#c68a4e] hover:text-black transition cursor-pointer border border-white/20 shadow-md"
-                          title="Prev Episode"
-                        >
-                          <SkipBack size={22} fill="currentColor" />
-                        </button>
-                        <button
-                          onClick={togglePlay}
-                          className="w-14 h-14 rounded-full bg-[#c68a4e] flex items-center justify-center text-black hover:bg-[#a4682f] transition cursor-pointer shadow-lg shadow-[#c68a4e]/40"
-                        >
-                          {playing ? <Pause fill="black" size={28} /> : <Play fill="black" size={28} className="ml-0.5" />}
-                        </button>
-                        <button
-                          data-testid="player-next-episode"
-                          onClick={playNextEpisode}
-                          className="w-12 h-12 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center text-white hover:bg-[#c68a4e] hover:text-black transition cursor-pointer border border-white/20 shadow-md"
-                          title="Next Episode"
-                        >
-                          <SkipForward size={22} fill="currentColor" />
-                        </button>
-                      </div>
-
-                      {/* Resolution, Speed selector and Fullscreen buttons */}
-                      <div className="flex gap-2 items-center">
-                        <button
-                          data-testid="player-resolution-btn"
-                          onClick={(e) => { e.stopPropagation(); setShowResolutionMenu(true); setShowSpeedMenu(false); }}
-                          className="h-11 text-white bg-black/65 hover:bg-primary hover:text-black px-3 rounded-2xl border border-white/25 backdrop-blur-md cursor-pointer transition flex items-center gap-1.5 shadow-md"
-                          title="Pilih resolusi video"
-                        >
-                          <span className="flex items-center justify-center w-6 h-6 rounded-md bg-white/15 text-[9px] font-black tracking-tight">
-                            HD
-                          </span>
-                          <span className="font-black tracking-wide text-[12px]">{activeResolution || 'Auto'}</span>
-                          <ChevronDown size={13} strokeWidth={3} />
-                        </button>
-                        <button
-                          data-testid="player-speed-btn"
-                          onClick={(e) => { e.stopPropagation(); setShowSpeedMenu(true); setShowResolutionMenu(false); }}
-                          className="h-11 text-white bg-black/65 hover:bg-primary hover:text-black px-3 rounded-2xl border border-white/25 backdrop-blur-md cursor-pointer transition flex items-center gap-1.5 shadow-md"
-                          title="Atur kecepatan putar"
-                        >
-                          <Gauge size={15} strokeWidth={2.5} />
-                          <span className="font-black tracking-wide text-[12px]">{playbackRate}x</span>
-                        </button>
-
-                        <button
-                          data-testid="player-fullscreen-btn"
-                          onClick={toggleFullScreen}
-                          className="w-11 h-11 rounded-2xl bg-black/65 backdrop-blur-md flex items-center justify-center text-white hover:bg-primary hover:text-black transition cursor-pointer border border-white/25 shadow-md"
-                          title="Fullscreen"
-                        >
-                          <Maximize size={18} />
-                        </button>
-                      </div>
-                    </div>
-
-                  </div>
-
-                  {/* Resolution bottom sheet — plek nanimeid: list radio
-                      simple, item active checkmark kanan, item lain hover.
-                      Tidak ada chip kotak besar di kiri/kanan. */}
-                  {showResolutionMenu && (
-                    <div
-                      className="fixed inset-0 z-[100] flex items-end justify-center pointer-events-auto"
-                      onClick={(e) => { e.stopPropagation(); setShowResolutionMenu(false); }}
-                    >
-                      <div className="absolute inset-0 bg-black/75 backdrop-blur-md" />
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="relative w-full max-w-md bg-[#101013] rounded-t-[24px] border-t border-white/10 shadow-2xl animate-fade-in"
-                        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-                      >
-                        <div className="mx-auto mt-2.5 mb-1 w-9 h-1 rounded-full bg-white/25" />
-                        <div className="px-5 pt-3 pb-3 border-b border-white/[0.07]">
-                          <h4 className="text-white font-black text-[15px] tracking-tight">Resolusi Video</h4>
-                        </div>
-                        <div className="py-2 max-h-[55vh] overflow-y-auto">
-                          <button
-                            data-testid="player-resolution-auto"
-                            onClick={() => { setActiveResolution('Auto'); setShowResolutionMenu(false); }}
-                            className="w-full flex items-center justify-between gap-3 px-5 py-3 transition hover:bg-white/[0.04]"
-                          >
-                            <span className="text-white text-[14px] font-medium leading-tight">Otomatis</span>
-                            {(!activeResolution || activeResolution === 'Auto') && (
-                              <CheckCircle2 size={18} className="text-primary" />
-                            )}
-                          </button>
-
-                          {availableResolutions.length === 0 ? (
-                            <div className="text-center text-white/55 text-[12.5px] py-5">
-                              Belum ada kualitas yang terdeteksi.
-                            </div>
-                          ) : (
-                            availableResolutions.map((res, idx) => {
-                              const isActive = activeResolution && activeResolution.toLowerCase().includes(res.toLowerCase().replace('p', ''));
-                              const isMax = idx === 0;
-                              return (
-                                <button
-                                  key={res}
-                                  data-testid="player-resolution-option"
-                                  onClick={() => { handleResolutionChange(res); setShowResolutionMenu(false); }}
-                                  className="w-full flex items-center justify-between gap-3 px-5 py-3 transition hover:bg-white/[0.04]"
-                                >
-                                  <span className="flex items-center gap-2.5">
-                                    <span className="text-white text-[14px] font-medium leading-tight">{res}</span>
-                                    {isMax && !isActive && (
-                                      <span className="text-[9.5px] font-black uppercase tracking-wider text-primary-light px-1.5 py-0.5 rounded bg-primary/15">
-                                        Maks
-                                      </span>
-                                    )}
-                                  </span>
-                                  {isActive && <CheckCircle2 size={18} className="text-primary" />}
-                                </button>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Speed bottom sheet — pola yang sama dengan resolusi. */}
-                  {showSpeedMenu && (
-                    <div
-                      className="fixed inset-0 z-[100] flex items-end justify-center pointer-events-auto"
-                      onClick={(e) => { e.stopPropagation(); setShowSpeedMenu(false); }}
-                    >
-                      <div className="absolute inset-0 bg-black/75 backdrop-blur-md" />
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="relative w-full max-w-md bg-[#101013] rounded-t-[24px] border-t border-white/10 shadow-2xl animate-fade-in"
-                        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-                      >
-                        <div className="mx-auto mt-2.5 mb-1 w-9 h-1 rounded-full bg-white/25" />
-                        <div className="px-5 pt-3 pb-3 border-b border-white/[0.07]">
-                          <h4 className="text-white font-black text-[15px] tracking-tight">Kecepatan Putar</h4>
-                        </div>
-                        <div className="py-2">
-                          {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => {
-                            const isActive = playbackRate === rate;
-                            const label = rate === 1 ? 'Normal' : `${rate}x`;
-                            return (
-                              <button
-                                key={rate}
-                                data-testid="player-speed-option"
-                                onClick={() => {
-                                  setPlaybackRate(rate);
-                                  if (playerRef.current) playerRef.current.playbackRate = rate;
-                                  setShowSpeedMenu(false);
-                                }}
-                                className="w-full flex items-center justify-between gap-3 px-5 py-3 transition hover:bg-white/[0.04]"
-                              >
-                                <span className="text-white text-[14px] font-medium leading-tight">{label}</span>
-                                {isActive && <CheckCircle2 size={18} className="text-primary" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </>
-        ) : (
-          /* Stream selesai load tetapi streamUrl masih kosong — biasanya
-             episode tidak punya server aktif atau resolver gagal silently.
-             Tampilkan UI recovery dengan opsi reload halaman & ganti sumber. */
-          <div className="w-full h-full flex flex-col items-center justify-center text-white bg-zinc-950 gap-3 p-8 text-center absolute inset-0 z-10">
-            <CloudOff size={28} className="text-amber-400" />
-            <span className="text-sm font-black">Stream sedang tidak tersedia</span>
-            <span className="text-[12px] text-zinc-400 max-w-sm leading-relaxed">
-              Server untuk episode ini belum balik link aktif. Coba muat ulang
-              atau pindah ke sumber lain.
-            </span>
-            <div className="flex flex-wrap gap-2 justify-center mt-1">
-              <button
-                onClick={() => {
-                  if (currentEpisode) {
-                    setCurrentEpisode({ ...currentEpisode });
-                  }
-                }}
-                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition active:scale-95"
-              >
-                Muat Ulang
-              </button>
-              {activeSource !== 'kuramanime' && (
-                <button
-                  onClick={() => switchSource('kuramanime', null, currentEpisode?.number || '1')}
-                  className="px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg text-xs font-bold cursor-pointer transition active:scale-95"
-                >
-                  Coba Kuramanime
-                </button>
-              )}
-              {activeSource === 'kuramanime' && anime?.title && (
-                <button
-                  onClick={async () => {
-                    // Re-search Kurama dengan judul anime saat ini lalu pindah
-                    // ke ID yang berbeda — sering kali ID yang dibawa dari
-                    // search adalah varian yang stream-nya tidak siap, padahal
-                    // ada ID Kurama lain yang sehat (mis. Yuru Camp Movie:
-                    // ada 2 entry di Kurama, satu kerangka dan satu aktif).
-                    try {
-                      const res = await fetch(`${API_BASE_URL}/kuramanime/search?q=${encodeURIComponent(anime.title)}`);
-                      const json = await res.json();
-                      const list = json?.data?.animeList || [];
-                      const wantSeason = seasonKey(anime.title);
-                      const candidates = list.filter((it) => seasonKey(it.title) === wantSeason && it.animeId !== anime.id);
-                      if (candidates.length > 0) {
-                        let best = candidates[0];
-                        let bestScore = titleSimilarity(anime.title, best.title || '');
-                        for (const it of candidates.slice(1)) {
-                          const sim = titleSimilarity(anime.title, it.title || '');
-                          if (sim > bestScore) { bestScore = sim; best = it; }
-                        }
-                        if (best?.animeId) {
-                          switchSource('kuramanime', best.animeId);
-                          return;
-                        }
-                      }
-                      showToast('Tidak ada varian Kurama lain untuk judul ini.');
-                    } catch (e) {
-                      console.warn('alt-Kuramanime lookup failed:', e);
-                      showToast('Pencarian alternatif gagal.');
-                    }
-                  }}
-                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition active:scale-95"
-                >
-                  Cari Varian Lain
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Video Detail Content (Non-Fullscreen) */}
-      <div className="cr-container mt-6 px-4">
-
-        {/* Server picker untuk Nekopoi — chip "Server 1", "Server 2", dst.
-            Hanya tampil kalau ada >1 server tersedia. */}
-        {activeSource === 'nekopoi' && episodeDetails?.serverList && episodeDetails.serverList.length > 1 && (
-          <div className="mb-5 bg-surface border border-border rounded-2xl px-4 py-3.5 shadow-sm">
-            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-text-muted mb-2.5 flex items-center gap-2">
-              <Play size={11} className="text-primary fill-current" />
-              Pilih Server
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {episodeDetails.serverList.slice(0, 6).map((server, idx) => {
-                const isActive = activeServerId === server.serverId;
-                return (
-                  <button
-                    key={`${server.serverId}-${idx}`}
-                    onClick={() => handleServerChange(server)}
-                    className={`px-4 py-2 rounded-xl text-[12.5px] font-bold border transition-all active:scale-95 ${
-                      isActive
-                        ? 'bg-primary text-white border-primary shadow-md shadow-primary/30'
-                        : 'bg-surface-highlight text-text-secondary border-border hover:border-primary/40 hover:text-text'
-                    }`}
-                  >
-                    Server {idx + 1}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Hidden Server Selector for E2E Test Compatibility */}
-        <select 
-          data-testid="server-selector"
-          value={activeServerId || ''}
-          onChange={(e) => {
-            const selected = episodeDetails?.serverList?.find(s => s.serverId === e.target.value);
-            if (selected) handleServerChange(selected);
-          }}
-          style={{ display: 'none' }}
-        >
-          {episodeDetails?.serverList?.map((server, idx) => (
-            <option key={idx} value={server.serverId}>
-              {server.title || `Server ${idx + 1}`}
-            </option>
-          )) || (
-            <option value="">Default Server</option>
           )}
-        </select>
 
-        {/* Details title and metadata */}
-        <h1 data-testid="video-detail-title" className="text-xl font-black text-black leading-tight mb-1">
-          {anime.title}
-        </h1>
-        <p className="text-xs font-bold text-zinc-400 mb-4">{currentEpisode.title}</p>
-        
-        <div className="flex items-center gap-3 text-xs text-zinc-500 font-bold mb-4 flex-wrap">
-           <span className="flex items-center gap-1 text-[#a4682f]">
-             <Star size={14} className="text-[#c68a4e] fill-current" /> {anime.rating || "8.5"}
-           </span>
-           <span>{anime.year || "2026"}</span>
-           <span className="uppercase text-[#c68a4e]">{displaySource}</span>
-        </div>
-
-        <div className="flex flex-wrap gap-2 mb-6">
-          {anime.genreList?.slice(0, 4).map((genre, idx) => {
-            const genreTitle = typeof genre === 'object' ? genre.title || genre.name : genre;
-            return (
-              <span key={idx} className="text-[11px] font-bold px-2.5 py-1 bg-surface text-text-secondary rounded-lg border border-border">
-                {genreTitle}
-              </span>
-            );
-          })}
-        </div>
-
-        {/* Action Row: Favorit, Download, Lapor — tombol Unduh tampil untuk
-            semua sumber termasuk Nekopoi sesuai permintaan user. */}
-        <div className="flex gap-3 mb-6 bg-surface p-2 rounded-full border border-border shadow-sm">
-          <button
-            data-testid="video-bookmark-btn"
-            onClick={toggleVideoBookmark}
-            className={`flex-1 flex flex-col gap-1 items-center justify-center py-2.5 rounded-full transition ${isVideoBookmarked ? 'text-primary' : 'text-text-secondary hover:text-primary'}`}
-          >
-            <Bookmark size={20} strokeWidth={2} fill={isVideoBookmarked ? "currentColor" : "none"} />
-            <span className="text-[11px] font-bold">Favorit</span>
-          </button>
-
-          <button
-            data-testid="video-download-btn"
-            onClick={handleDownloadEpisode}
-            className="flex-1 flex flex-col gap-1 items-center justify-center py-2.5 rounded-full transition text-text-secondary hover:text-primary"
-          >
-            <Download size={20} strokeWidth={2} />
-            <span className="text-[11px] font-bold">Unduh</span>
-          </button>
-
-          <button
-            data-testid="video-report-btn"
-            onClick={() => setShowReportModal(true)}
-            className="flex-1 flex flex-col gap-1 items-center justify-center py-2.5 rounded-full transition text-text-secondary hover:text-red-500"
-          >
-            <AlertTriangle size={20} strokeWidth={2} />
-            <span className="text-[11px] font-bold">Lapor</span>
-          </button>
-        </div>
-
-        {/* Tab bar ala nanimeid: Informasi & Komentar */}
-        <div className="player-tabs flex items-center gap-1 border-b border-border mb-5 sticky top-0 z-10 bg-bg/95 backdrop-blur-md">
-          {[
-            { id: 'info', label: 'Informasi' },
-            { id: 'comments', label: 'Komentar' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              data-testid={`player-tab-${tab.id}`}
-              onClick={() => setPlayerTab(tab.id)}
-              className={`flex-1 px-4 py-3 text-[13px] font-black uppercase tracking-[0.16em] transition-colors relative ${
-                playerTab === tab.id ? 'text-primary' : 'text-text-secondary hover:text-text'
-              }`}
-            >
-              {tab.label}
-              <span className={`absolute left-3 right-3 bottom-0 h-0.5 rounded-full transition-all ${playerTab === tab.id ? 'bg-primary' : 'bg-transparent'}`} />
-            </button>
-          ))}
-        </div>
-
-        {playerTab === 'info' ? (
-          <div className="space-y-6">
-            <SynopsisBlock text={anime.synopsis} />
-            <SeriesList currentTitle={anime?.title} currentId={anime?.id} activeSource={activeSource} navigate={navigate} />
-          </div>
-        ) : null}
-
-        {playerTab === 'info' && (
-        <div className="episodes-container">
-          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-            <h2 className="text-[14px] font-black uppercase tracking-[0.18em] text-text flex items-center gap-2.5">
-              <span className="w-1.5 h-5 rounded-full bg-primary" />
-              Daftar Episode
-              <span className="ml-1 inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-full bg-primary/15 text-primary text-[11px] font-black normal-case tracking-normal border border-primary/25">
-                {anime.episodes.length}
-              </span>
-            </h2>
-            {anime.episodes.length > 6 && (
-              <div className="relative w-44">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-                <input
-                  data-testid="player-episode-search-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={episodeSearch}
-                  onChange={(e) => setEpisodeSearch(e.target.value)}
-                  placeholder="Cari episode..."
-                  className="w-full pl-8 pr-3 h-9 rounded-full border border-border bg-surface text-[13px] font-bold text-text placeholder:text-text-muted placeholder:font-medium focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/15 transition"
-                />
-              </div>
-            )}
-          </div>
-          {(() => {
-            const filtered = episodeSearch.trim()
-              ? anime.episodes.filter((ep) =>
-                  String(ep.number || '').includes(episodeSearch.trim()) ||
-                  formatEpisodeTitle(ep.title, anime?.title).toLowerCase().includes(episodeSearch.trim().toLowerCase())
-                )
-              : anime.episodes;
-
-            if (filtered.length === 0) {
-              return (
-                <div className="text-center py-8 px-4 bg-surface rounded-2xl border border-border">
-                  <p className="text-[13px] font-bold text-text-secondary">Tidak ada episode yang cocok.</p>
+          {episodes.length > 0 && (
+            <div className="mb-5">
+              <h3 className="mb-3 text-sm font-bold text-ink">Daftar Episode</h3>
+              {batchQueue.length > 0 && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl bg-accent/10 px-4 py-2.5 text-sm font-medium text-accent">
+                  <ListIcon size={16} />
+                  Batch: {batchQueue.findIndex(n => n === currentEp?.number) + 1}/{batchQueue.length}
                 </div>
-              );
-            }
-
-            // Nanimeid-style episode grid: kotak kecil padat, isi nomor saja,
-            // baris current episode di-highlight dengan accent primary.
-            return (
-              <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-1.5 max-h-[360px] overflow-y-auto pr-1 no-scrollbar bg-surface border border-border rounded-2xl p-3">
-                {filtered.map((ep) => {
-                  const isCur = currentEpisode.id === ep.id;
+              )}
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6" ref={epGridRef}>
+                {episodes.map(ep => {
+                  const inBatch = batchQueue.includes(ep.number);
+                  const batchIdx = batchQueue.indexOf(ep.number);
+                  const curBatchIdx = batchQueue.indexOf(currentEp?.number || 0);
+                  const batchDone = batchIdx >= 0 && batchIdx < curBatchIdx;
+                  const isActive = ep.number === currentEp?.number;
                   return (
-                    <button
-                      key={ep.id}
-                      onClick={() => {
-                        setCurrentEpisode(ep);
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }}
-                      className={`relative aspect-square rounded-lg flex items-center justify-center transition-all active:scale-[0.92] text-center font-black ${
-                        isCur
-                          ? 'bg-primary text-white shadow-md shadow-primary/30 ring-2 ring-primary-dark'
-                          : 'bg-surface-highlight text-text hover:bg-primary/15 hover:text-primary border border-border'
-                      }`}
-                      title={`Episode ${ep.number} — ${formatEpisodeTitle(ep.title, anime?.title)}`}
-                    >
-                      <span className="text-[15px] leading-none tracking-tight">{ep.number}</span>
-                      {isCur && (
-                        <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-primary-light border-2 border-bg" />
+                    <button key={ep.id || ep.number} data-ep={ep.number}
+                      onClick={() => setCurrentEp(ep)}
+                      className={cx("flex flex-col items-center gap-1 rounded-xl border p-3 text-center transition relative",
+                        isActive ? 'border-accent bg-accent/10 text-accent' :
+                        inBatch ? batchDone ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-accent/30 bg-accent/5 text-ink' :
+                        'border-line/60 bg-elevated/60 text-ink hover:border-accent/30')}>
+                      <span className="text-lg font-bold">{ep.number}</span>
+                      <span className="text-[10px] opacity-70">Episode</span>
+                      {(() => {
+                        const dd = dlKeys.get(`${anime.id}:${ep.number}`);
+                        if (!dd) return null;
+                        if (dd.status === 'done') return <span className="absolute right-1.5 top-1.5 text-emerald-400"><CheckCircleIcon size={13} /></span>;
+                        if (dd.status === 'downloading' || dd.status === 'queued') return <span className="absolute right-1.5 top-1.5 text-accent"><DownloadIcon size={13} /></span>;
+                        return null;
+                      })()}
+                      {inBatch && (
+                        <span className={cx("text-[9px] font-bold", batchDone ? "text-emerald-300" : "text-accent")}>
+                          {batchDone ? '✓' : '▶'}
+                        </span>
                       )}
                     </button>
                   );
                 })}
               </div>
-            );
-          })()}
+            </div>
+          )}
+
+          <div className="mb-5 flex items-center gap-2">
+            <Link to={`/anime/${id}`}
+              className="flex items-center gap-1.5 rounded-full bg-elevated px-4 py-2 text-xs font-semibold text-ink transition hover:bg-line">
+              <EyeIcon size={14} /> Detail Anime
+            </Link>
+          </div>
         </div>
-        )}
+      </div>
+    </Shell>
+  );
+}
 
-        {playerTab === 'comments' && (
-          <CommentSection
-            animeId={anime?.id || id}
-            episode={currentEpisode?.number ? String(currentEpisode.number) : null}
-            userId={getCurrentUserId()}
-          />
-        )}
+const SHORTCUTS = [
+  ["Spasi / K", "Putar / Jeda"],
+  ["J / ←", "Mundur 10 detik"],
+  ["L / →", "Maju 10 detik"],
+  ["F", "Layar penuh"],
+  ["Shift+L", "Kunci kontrol"],
+  ["N", "Episode berikutnya"],
+  ["S", "Lewati intro"],
+  ["E", "Lewati outro"],
+  ["R", "Ulangi episode"],
+  ["C", "Tangkap frame"],
+  ["0-9", "Lompat ke 0-90%"],
+  ["?", "Bantuan ini"],
+];
 
-        {showReportModal && (
-          <div
-            className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-md p-0 sm:p-4 animate-fade-in"
-            onClick={() => setShowReportModal(false)}
-          >
-            <div
-              className="bg-surface border-t sm:border border-border rounded-t-3xl sm:rounded-3xl px-6 pt-6 pb-8 max-w-md w-full shadow-2xl space-y-5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="sm:hidden mx-auto -mt-2 mb-3 w-10 h-1.5 rounded-full bg-text-muted/30" />
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-red-500/15 text-red-500 flex items-center justify-center border border-red-500/25">
-                  <AlertTriangle size={20} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-black text-text leading-tight">Lapor Masalah</h3>
-                  <p className="text-[12px] text-text-secondary font-medium mt-0.5">
-                    Beri tahu kami bug atau masalah pada episode ini
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowReportModal(false)}
-                  className="w-9 h-9 rounded-2xl bg-surface-highlight hover:bg-border text-text-muted hover:text-text transition flex items-center justify-center"
-                  aria-label="Tutup"
-                >
-                  <X size={16} />
+function IconBtn({ children, onClick, label, className, disabled }) {
+  return (
+    <button onClick={onClick} aria-label={label} disabled={disabled}
+      className={cx("flex h-9 w-9 items-center justify-center rounded-full text-white transition active:scale-90 disabled:opacity-30", className)}>
+      {children}
+    </button>
+  );
+}
+
+function VideoPlayer({ animeId, title, poster, anime, episodeNumber, qualities, onEnded, startAt = 0, hasPrev = false, hasNext = false, onPrev, onNext, episodes = [], onSelectEpisode, type = "", epSkipIntro }) {
+  const navigate = useNavigate();
+  const toastCtx = useToast();
+  const toast = typeof toastCtx?.toast === 'function' ? toastCtx.toast : (() => {});
+  const ctxPlayer = usePlayer();
+  const internalVideoRef = useRef(null);
+  const videoRef = (ctxPlayer && ctxPlayer.videoRef && typeof ctxPlayer.videoRef === 'object' && ctxPlayer.videoRef !== null)
+    ? ctxPlayer.videoRef
+    : internalVideoRef;
+  const ctxPlay = typeof ctxPlayer?.play === 'function' ? ctxPlayer.play : (() => {});
+  const ctxMinimize = typeof ctxPlayer?.minimize === 'function' ? ctxPlayer.minimize : (() => {});
+  const wrapRef = useRef(null);
+  const hideTimer = useRef(null);
+  const startAtRef = useRef(0);
+  const seekedRef = useRef(false);
+  const clickTimer = useRef(null);
+  const rippleId = useRef(0);
+  const lastX = useRef(0);
+  const lastClickHide = useRef(0);
+  const onEndedRef = useRef(onEnded);
+
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [buffered, setBuffered] = useState(0);
+  const [rate, setRate] = useState(1);
+  const [quality, setQuality] = useState(() => {
+    const prefs = getPlayback();
+    const sq = new URLSearchParams(window.location.search).get("q");
+    return sq || prefs?.defaultQuality || "";
+  });
+  const [showControls, setShowControls] = useState(true);
+  const [menu, setMenu] = useState("none");
+  const [fullscreen, setFullscreen] = useState(false);
+  const [buffering, setBuffering] = useState(false);
+  const [pip, setPip] = useState(false);
+  const [pipSupported, setPipSupported] = useState(false);
+  const [hoverFrac, setHoverFrac] = useState(null);
+  const [ripples, setRipples] = useState([]);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [ended, setEnded] = useState(false);
+  const [countdown, setCountdown] = useState(null);
+  const [locked, setLocked] = useState(false);
+  const [aspect, setAspect] = useState("contain");
+  const [showPlaylist, setShowPlaylist] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [brightness, setBrightness] = useState(1);
+  const [videoError, setVideoError] = useState(null);
+  const [loopEp, setLoopEp] = useState(false);
+  const [streamPick, setStreamPick] = useState({ ep: -1, q: null });
+  const dls = useDownloads();
+  const localKey = `${animeId}:${episodeNumber}`;
+  const localSrc = useMemo(() => {
+    if (streamPick.ep === episodeNumber && streamPick.q) return null;
+    const d = dls.find(x => x.key === localKey);
+    return (d && d.status === 'done' && getLocalUrl(localKey)) || null;
+  }, [localKey, dls, streamPick, episodeNumber]);
+  const [swipeHint, setSwipeHint] = useState(null);
+  const touchStart = useRef({ x: 0, y: 0, t: 0, vol: 1, bright: 1 });
+  const swipeHintTimer = useRef(null);
+  const loopEpRef = useRef(false);
+  useEffect(() => { loopEpRef.current = loopEp; }, [loopEp]);
+  const lastGoodDuration = useRef(0);
+
+  const prefs = useMemo(() => getPlayback(), []);
+  const skipIntro = prefs.skipIntroSeconds || 85;
+  const skipOutro = prefs.skipOutroSeconds || 90;
+
+  useEffect(() => { setVideoError(null); }, [episodeNumber]);
+  onEndedRef.current = onEnded;
+
+  const safeQualities = useMemo(() => (qualities && typeof qualities === 'object') ? qualities : {}, [qualities]);
+  const keys = useMemo(() => Object.keys(safeQualities).length ? Object.keys(safeQualities) : ["1080p"], [safeQualities]);
+  const activeQuality = useMemo(() => {
+    if (quality && safeQualities[quality]) return quality;
+    if (prefs.defaultQuality && safeQualities[prefs.defaultQuality]) return prefs.defaultQuality;
+    return keys[0] || "";
+  }, [quality, safeQualities, keys, prefs.defaultQuality]);
+
+  const src = localSrc || safeQualities[activeQuality] || Object.values(safeQualities)[0] || FALLBACK;
+
+  useEffect(() => {
+    startAtRef.current = startAt;
+    seekedRef.current = false;
+    setEnded(false);
+    setCountdown(null);
+  }, [startAt, episodeNumber]);
+
+  useEffect(() => {
+    setCurrent(0);
+    setEnded(false);
+    setCountdown(null);
+  }, [episodeNumber]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !src) return;
+    const resume = startAt > 0 ? startAt : undefined;
+    v.src = src;
+    v.load();
+
+    let played = false;
+    const attemptPlay = () => {
+      if (played) return;
+      if (resume && resume < v.duration) v.currentTime = resume;
+      const p = v.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => { played = true; }).catch(() => {});
+      }
+    };
+
+    v.addEventListener('loadedmetadata', attemptPlay);
+    v.addEventListener('canplay', attemptPlay);
+
+    const onError = (e) => {
+      if (v.error && v.error.code !== 0) {
+        console.warn("Video element load error:", v.error);
+        const activeKey = quality || keys[0];
+        const altKey = keys.find(k => k !== activeKey && safeQualities[k]);
+        if (altKey) {
+          toast(`Resolusi ${activeKey} bermasalah. Mengalihkan ke ${altKey}...`, "info");
+          setQuality(altKey);
+        } else {
+          setVideoError("Gagal memuat video. Silakan coba lagi beberapa saat.");
+        }
+      }
+    };
+
+    v.addEventListener('error', onError);
+    ctxPlay({ animeId, ep: episodeNumber, title, poster, src });
+
+    return () => {
+      v.removeEventListener('loadedmetadata', attemptPlay);
+      v.removeEventListener('canplay', attemptPlay);
+      v.removeEventListener('error', onError);
+    };
+  }, [src, episodeNumber, quality, keys, safeQualities, toast]);
+
+  useEffect(() => {
+    if (!ended || !hasNext || !prefs.autoplayNext) { setCountdown(null); return; }
+    setCountdown(5);
+    let c = 5;
+    const id = setInterval(() => {
+      c -= 1;
+      if (c <= 0) { clearInterval(id); setCountdown(0); onNext?.(); }
+      else setCountdown(c);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [ended, hasNext, prefs.autoplayNext, onNext]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.volume = prefs.defaultVolume;
+    v.muted = prefs.muted;
+    v.playbackRate = prefs.defaultRate;
+    setRate(prefs.defaultRate);
+  }, [prefs]);
+
+  const toggle = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    setEnded(false);
+    if (v.paused) v.play().catch(() => {});
+    else v.pause();
+  }, []);
+
+  const skip = useCallback((s) => {
+    const v = videoRef.current;
+    if (v) v.currentTime = Math.max(0, Math.min(v.duration || 0, v.currentTime + s));
+  }, []);
+
+  const seekFrac = useCallback((f) => {
+    const v = videoRef.current;
+    if (v && v.duration) v.currentTime = f * v.duration;
+  }, []);
+
+  const jumpToEnd = useCallback(() => {
+    const v = videoRef.current;
+    if (v && v.duration) v.currentTime = v.duration;
+  }, []);
+
+  const captureFrame = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = v.videoWidth;
+      canvas.height = v.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title.replace(/[^a-z0-9_-]+/gi, '_')}_EP${episodeNumber}_${Math.floor(v.currentTime)}s.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+      }, 'image/png');
+    } catch {}
+  }, [title, episodeNumber]);
+
+  const setR = useCallback((r) => {
+    setRate(r);
+    const v = videoRef.current;
+    if (v) v.playbackRate = r;
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const isFs = fullscreen || document.fullscreenElement || document.webkitFullscreenElement || wrap.classList.contains('is-fullscreen');
+
+    if (isFs) {
+      // Keluar dari fullscreen
+      setFullscreen(false);
+      wrap.classList.remove('force-landscape');
+      wrap.classList.remove('is-fullscreen');
+      try {
+        if (document.exitFullscreen) await document.exitFullscreen().catch(() => {});
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      } catch {}
+      // Unlock orientation (native + web)
+      await unlockOrientationNative();
+      try { screen.orientation?.unlock?.(); } catch {}
+      // Keluar immersive mode — tampilkan kembali status bar & nav bar
+      if (Immersive) Immersive.exit().catch(() => {});
+      return;
+    }
+
+    // Masuk fullscreen
+    setFullscreen(true);
+
+    // 1) Coba native plugin dulu (Capacitor Android) — paling reliable
+    const nativeLocked = await lockLandscapeNative();
+
+    // 2) Request fullscreen (WebView / browser)
+    try {
+      const enter = wrap.requestFullscreen ? wrap.requestFullscreen()
+        : wrap.webkitRequestFullscreen ? wrap.webkitRequestFullscreen()
+        : null;
+      if (enter && typeof enter.then === 'function') await enter.catch(() => {});
+    } catch {}
+
+    // 3) Kalau bukan native, coba Web API orientation lock
+    if (!nativeLocked && !IS_NATIVE) {
+      try { await screen.orientation?.lock?.('landscape'); } catch {}
+    }
+
+    // 4) Kalau native lock berhasil tapi WebView tidak masuk system-level fullscreen,
+    //    tetap force is-fullscreen class supaya wrapper cover layar penuh
+    if (IS_NATIVE) {
+      wrap.classList.add('is-fullscreen');
+      // Masuk immersive mode — hide status bar & nav bar
+      if (Immersive) Immersive.enter().catch(() => {});
+    }
+
+    // 5) Fallback CSS rotate: setelah 300ms, kalau layar tetap portrait, rotate manual
+    setTimeout(() => {
+      const w = wrapRef.current;
+      if (!w) return;
+      if (window.innerHeight > window.innerWidth) {
+        w.classList.add('force-landscape');
+      } else {
+        w.classList.remove('force-landscape');
+      }
+    }, 300);
+  }, [fullscreen]);
+
+  const minimizeToMiniPlayer = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !src) return;
+    ctxMinimize();
+  }, [src, videoRef, ctxMinimize]);
+
+  const togglePip = useCallback(async () => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    // Native Android PiP: video di luar aplikasi
+    if (IS_NATIVE && Immersive && typeof Immersive.enterPip === 'function') {
+      try {
+        setPip(true);
+        // Berikan kesempatan React menyembunyikan kontrol sebelum OS mengambil snapshot PiP
+        await new Promise(r => setTimeout(r, 50));
+        await Immersive.enterPip();
+        return;
+      } catch (e) {
+        setPip(false);
+        console.warn('[Native Android PiP error]:', e);
+      }
+    }
+
+    // Web PiP API (browser / desktop)
+    if ('pictureInPictureEnabled' in document && document.pictureInPictureEnabled) {
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+          setPip(false);
+          return;
+        }
+        await v.requestPictureInPicture();
+        setPip(true);
+        return;
+      } catch (e) {
+        console.warn('[PiP API fallback to MiniPlayer]:', e);
+      }
+    }
+
+    // Fallback terakhir: Mini Player overlay di dalam app
+    minimizeToMiniPlayer();
+    toast('Pop-up video diaktifkan!', 'info');
+  }, [minimizeToMiniPlayer, toast]);
+
+  const changeQuality = useCallback((q) => {
+    const v = videoRef.current;
+    const t = v?.currentTime || 0;
+    const wasPlaying = playing;
+    setQuality(q);
+    setVideoError(null);
+    requestAnimationFrame(() => {
+      const vv = videoRef.current;
+      if (vv) {
+        vv.currentTime = t;
+        if (wasPlaying) vv.play().catch(() => {});
+      }
+    });
+  }, [playing]);
+
+  const fireRipple = useCallback((side) => {
+    const id = ++rippleId.current;
+    const dir = side === "left" ? -1 : 1;
+    setRipples(p => [...p, { id, side, dir }]);
+    skip(dir * 10);
+    setTimeout(() => setRipples(p => p.filter(r => r.id !== id)), 700);
+  }, [skip]);
+
+  const showSwipeHint = useCallback((text) => {
+    setSwipeHint(text);
+    if (swipeHintTimer.current) clearTimeout(swipeHintTimer.current);
+    swipeHintTimer.current = setTimeout(() => setSwipeHint(null), 800);
+  }, []);
+
+  const poke = useCallback(() => {
+    if (locked) return;
+    if (Date.now() - lastClickHide.current < 500) return;
+    setShowControls(true);
+  }, [locked]);
+
+  const toggleLock = useCallback(() => {
+    setLocked(l => {
+      const next = !l;
+      if (next) { setShowControls(false); setMenu("none"); setShowPlaylist(false); }
+      else setShowControls(true);
+      return next;
+    });
+  }, []);
+
+  const onVideoClick = useCallback(() => {
+    if (locked) return;
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      const v = videoRef.current;
+      if (v) {
+        const w = v.getBoundingClientRect().width;
+        fireRipple(lastX.current < w / 2 ? "left" : "right");
+      }
+      return;
+    }
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      setShowControls(prev => {
+        const next = !prev;
+        if (!next) {
+          lastClickHide.current = Date.now();
+          setMenu("none");
+        }
+        return next;
+      });
+    }, 260);
+  }, [locked, fireRipple]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onTime = () => setCurrent(v.currentTime);
+    const onMeta = () => {
+      const d = v.duration || 0;
+      setDuration(d);
+      if (d > 0) lastGoodDuration.current = Math.floor(d);
+      if (!seekedRef.current) {
+        if (startAtRef.current > 1 && v.duration && startAtRef.current < v.duration - 2) {
+          seekedRef.current = true;
+          v.currentTime = startAtRef.current;
+        }
+        if (startAtRef.current > 0) v.play().catch(() => {});
+      }
+    };
+    const onProgress = () => {
+      if (v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1));
+    };
+    const onPlay = () => { setPlaying(true); setBuffering(false); setEnded(false); };
+    const onPause = () => setPlaying(false);
+    const onEnd = () => {
+      setPlaying(false);
+      if (loopEpRef.current) {
+        const vv = v;
+        vv.currentTime = 0;
+        vv.play().catch(() => {});
+        return;
+      }
+      setEnded(true);
+      onEndedRef.current();
+    };
+    const onWaiting = () => setBuffering(true);
+    const onCanPlay = () => setBuffering(false);
+    const onRate = () => setRate(v.playbackRate);
+    const onError = () => {
+      const err = v.error;
+      const src = v.currentSrc || v.src || '';
+      if (err) {
+        const isGDrive = src.includes('usercontent.google.com');
+        setVideoError(isGDrive ? 'gdrive' : 'unknown');
+      }
+      setBuffering(false);
+    };
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("loadedmetadata", onMeta);
+    v.addEventListener("durationchange", onMeta);
+    v.addEventListener("progress", onProgress);
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    v.addEventListener("ended", onEnd);
+    v.addEventListener("waiting", onWaiting);
+    v.addEventListener("stalled", onWaiting);
+    v.addEventListener("canplay", onCanPlay);
+    v.addEventListener("playing", onCanPlay);
+    v.addEventListener("ratechange", onRate);
+    v.addEventListener("error", onError);
+    return () => {
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("loadedmetadata", onMeta);
+      v.removeEventListener("durationchange", onMeta);
+      v.removeEventListener("progress", onProgress);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+      v.removeEventListener("ended", onEnd);
+      v.removeEventListener("waiting", onWaiting);
+      v.removeEventListener("stalled", onWaiting);
+      v.removeEventListener("canplay", onCanPlay);
+      v.removeEventListener("playing", onCanPlay);
+      v.removeEventListener("ratechange", onRate);
+      v.removeEventListener("error", onError);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => {
+      const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+      setFullscreen(isFs);
+      if (!isFs) {
+        // Keluar fullscreen native: cabut force-landscape jika terpasang
+        wrapRef.current?.classList.remove('force-landscape');
+        wrapRef.current?.classList.remove('is-fullscreen');
+        try { screen.orientation?.unlock?.(); } catch {}
+        if (Immersive) Immersive.exit().catch(() => {});
+      }
+    };
+    const onOrient = () => {
+      // Kalau HP sekarang benar-benar landscape, buang fallback rotate
+      // supaya tidak double-rotate. Kalau kembali portrait saat fullscreen,
+      // pasang lagi.
+      const w = wrapRef.current;
+      if (!w) return;
+      const isFsNow = Boolean(document.fullscreenElement || document.webkitFullscreenElement) || w.classList.contains('is-fullscreen');
+      if (!isFsNow) return;
+      if (window.innerWidth >= window.innerHeight) {
+        w.classList.remove('force-landscape');
+      } else {
+        w.classList.add('force-landscape');
+      }
+    };
+    const onEnter = () => setPip(true);
+    const onLeave = () => setPip(false);
+
+    // Native Android PiP mode change (dari MainActivity)
+    const onNativePip = (e) => {
+      const isInPip = e?.detail?.pip === true;
+      setPip(isInPip);
+      const w = wrapRef.current;
+      if (w) {
+        if (isInPip) {
+          w.classList.add('native-pip-active');
+        } else {
+          w.classList.remove('native-pip-active');
+          w.classList.remove('pip-preparing');
+        }
+      }
+    };
+
+    document.addEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs);
+    window.addEventListener("orientationchange", onOrient);
+    window.addEventListener("resize", onOrient);
+    window.addEventListener("pipModeChanged", onNativePip);
+    const v = videoRef.current;
+    v?.addEventListener("enterpictureinpicture", onEnter);
+    v?.addEventListener("leavepictureinpicture", onLeave);
+
+    // Native Capacitor orientation listener — lebih reliable dari web event
+    // di WebView Android. Fire langsung dari OS level.
+    let nativeOrientHandle = null;
+    if (IS_NATIVE) {
+      ScreenOrientation.addListener('screenOrientationChange', (result) => {
+        const w = wrapRef.current;
+        if (!w) return;
+        const isFsNow = Boolean(document.fullscreenElement || document.webkitFullscreenElement) || w.classList.contains('is-fullscreen');
+        if (!isFsNow) return;
+        const isLandscape = result.type?.startsWith('landscape');
+        if (isLandscape) {
+          w.classList.remove('force-landscape');
+        } else {
+          w.classList.add('force-landscape');
+        }
+      }).then(h => { nativeOrientHandle = h; }).catch(() => {});
+    }
+
+    return () => {
+      document.removeEventListener("fullscreenchange", onFs);
+      document.removeEventListener("webkitfullscreenchange", onFs);
+      window.removeEventListener("orientationchange", onOrient);
+      window.removeEventListener("resize", onOrient);
+      window.removeEventListener("pipModeChanged", onNativePip);
+      v?.removeEventListener("enterpictureinpicture", onEnter);
+      v?.removeEventListener("leavepictureinpicture", onLeave);
+      if (nativeOrientHandle) {
+        nativeOrientHandle.remove().catch(() => {});
+      }
+    };
+  }, []);
+
+  useEffect(() => { setPipSupported(true); }, []);
+
+  // MediaSession API: Android Notification bar & Lockscreen controls + Background audio playback
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+
+    try {
+      const epTitle = title || (episodeNumber ? `Episode ${episodeNumber}` : 'Memutar Video');
+      const rawPoster = poster || anime?.poster || '';
+      let absPoster = rawPoster;
+      if (rawPoster && !rawPoster.startsWith('http')) {
+        try { absPoster = new URL(rawPoster, window.location.href).href; } catch {}
+      }
+
+      if (typeof window.MediaMetadata === 'function') {
+        navigator.mediaSession.metadata = new window.MediaMetadata({
+          title: String(epTitle),
+          artist: String(title || anime?.title || 'MahiStream'),
+          album: 'MahiStream Anime',
+          artwork: absPoster ? [{ src: absPoster, sizes: '512x512', type: 'image/png' }] : []
+        });
+      }
+
+      const setHandler = (action, handler) => {
+        try { navigator.mediaSession.setActionHandler(action, handler); } catch {}
+      };
+
+      setHandler('play', () => { videoRef.current?.play().catch(() => {}); });
+      setHandler('pause', () => { videoRef.current?.pause(); });
+      setHandler('seekto', (details) => {
+        if (details.seekTime != null && videoRef.current) {
+          videoRef.current.currentTime = details.seekTime;
+        }
+      });
+      setHandler('previousepisode', hasPrev ? () => onPrev?.() : null);
+      setHandler('nextepisode', hasNext ? () => onNext?.() : null);
+    } catch (e) {
+      console.warn('[MediaSession error]:', e);
+    }
+  }, [anime, episodeNumber, title, poster, hasPrev, hasNext, onPrev, onNext]);
+
+  useEffect(() => { if (!locked) poke(); }, [locked, poke]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      switch (e.key) {
+        case " ": e.preventDefault(); toggle(); break;
+        case "k": if (!e.ctrlKey && !e.metaKey) { e.preventDefault(); toggle(); } break;
+        case "ArrowLeft": case "j": skip(-10); break;
+        case "ArrowRight": case "l": skip(10); break;
+        case "f": toggleFullscreen(); break;
+        case "n": onNext?.(); break;
+        case "s": skip(skipIntro); break;
+        case "e": jumpToEnd(); break;
+        case "r": setLoopEp(l => !l); break;
+        case "c": captureFrame(); break;
+        case "L": toggleLock(); break;
+        default: if (/^[0-9]$/.test(e.key)) seekFrac(Number(e.key) / 10);
+      }
+      poke();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggle, skip, toggleFullscreen, toggleLock, onNext, seekFrac, skipIntro, jumpToEnd, captureFrame, poke]);
+
+  useEffect(() => {
+    const sendWatchHeartbeat = () => {
+      const v = videoRef.current;
+      if (v && v.currentTime > 1) {
+        const rawDur = v.duration;
+        const durSec = (rawDur && isFinite(rawDur) && rawDur > 0) ? Math.floor(rawDur) : 0;
+        if (durSec > 0) lastGoodDuration.current = durSec;
+        const finalDur = durSec > 0 ? durSec : lastGoodDuration.current;
+        if (finalDur <= 0) return;
+        api("/history", "POST", {
+          userId: uid(),
+          animeId: animeId,
+          episode: episodeNumber,
+          progress_seconds: Math.floor(v.currentTime),
+          duration_seconds: finalDur,
+          title: title || "",
+          poster: poster || "",
+          quality: quality || Object.keys(qualities)[0] || "",
+        }).catch(() => {});
+      }
+    };
+
+    const id = setInterval(sendWatchHeartbeat, 5000);
+    const watchId = setInterval(() => {
+      const v = videoRef.current;
+      if (v && !v.paused && v.currentTime > 1) {
+        api("/user/watch-time", "POST", { userId: uid(), seconds: 30 }).catch(() => {});
+      }
+    }, 30000);
+    return () => {
+      sendWatchHeartbeat();
+      clearInterval(id);
+      clearInterval(watchId);
+    };
+  }, [animeId, episodeNumber, title, poster, quality]);
+
+  const pct = duration ? (current / duration) * 100 : 0;
+  const bufPct = duration ? (buffered / duration) * 100 : 0;
+  const hoverTime = hoverFrac != null && duration ? hoverFrac * duration : null;
+  const isMovieType = Boolean(type && (type.toLowerCase().includes("movie") || type.toLowerCase().includes("film")));
+  const controlsVisible = !locked && showControls && !pip;
+  const skipRange = useMemo(() => {
+    const raw = epSkipIntro;
+    if (!raw) return null;
+    if (typeof raw === 'number' && raw > 0) return [8, raw];
+    if (typeof raw === 'string') {
+      const m = raw.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+      if (m) return [parseInt(m[1], 10) * 60 + parseInt(m[2], 10), parseInt(m[3], 10) * 60 + parseInt(m[4], 10)];
+      const m2 = raw.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (m2) return [parseInt(m2[1], 10), parseInt(m2[2], 10)];
+      const n = parseFloat(raw);
+      if (!isNaN(n) && n > 0) return [8, n];
+    }
+    return null;
+  }, [epSkipIntro]);
+  const skipStart = skipRange ? skipRange[0] : null;
+  const skipEnd = skipRange ? skipRange[1] : null;
+  const skipLabel = skipRange ? ' (' + fmtTime(skipStart) + '–' + fmtTime(skipEnd) + ')' : '';
+  const showSkipIntro = !isMovieType && playing && !ended && controlsVisible && (skipRange ? (current >= skipStart && current < skipEnd) : (current > 8 && current < skipIntro));
+  const showSkipOutro = !isMovieType && duration > 30 && current > (duration - skipOutro) && current < duration - 1 && playing && !ended && controlsVisible;
+
+  return (
+    <div className="space-y-4">
+      <div ref={wrapRef} data-testid="nanimeid-player-skin"
+        className={cx("video-wrapper group relative w-full overflow-hidden bg-black shadow-2xl ring-0 ring-white/10", fullscreen && "is-fullscreen", fullscreen ? "h-full" : "rounded-none sm:rounded-2xl")}
+      onMouseMove={(e) => { lastX.current = e.clientX; }}
+      onMouseLeave={() => setHoverFrac(null)}>
+      <div className={cx("relative w-full select-none", fullscreen ? "h-full" : "aspect-video")}>
+        <video ref={videoRef} className="absolute inset-0 h-full w-full" style={{ objectFit: aspect === "fill" ? "fill" : aspect === "cover" ? "cover" : "contain" }} preload="auto" playsInline />
+        <div
+          className="absolute inset-0 z-0 bg-transparent"
+          style={{ filter: `brightness(${brightness})` }}
+          onClick={onVideoClick}
+          onDoubleClick={(e) => {
+            if (locked) return;
+            if (clickTimer.current) { clearTimeout(clickTimer.current); clickTimer.current = null; }
+            const r = e.currentTarget.getBoundingClientRect();
+            fireRipple(e.clientX - r.left < r.width / 2 ? "left" : "right");
+          }}
+          onMouseMove={(e) => { lastX.current = e.clientX; }}
+          onTouchStart={(e) => {
+            if (locked) return;
+            const t = e.touches[0];
+            touchStart.current = {
+              x: t.clientX, y: t.clientY, t: Date.now(),
+              vol: videoRef.current?.volume ?? 1,
+              bright: brightness,
+              half: t.clientX < (e.currentTarget.getBoundingClientRect().width / 2),
+            };
+          }}
+          onTouchMove={(e) => {
+            if (locked || !touchStart.current.t) return;
+            const t = e.touches[0];
+            const dx = t.clientX - touchStart.current.x;
+            const dy = t.clientY - touchStart.current.y;
+            if (Math.abs(dx) > Math.abs(dy) + 8 && Math.abs(dx) > 24) {
+              return;
+            }
+            if (Math.abs(dy) < 20) return;
+            e.preventDefault();
+            const v = videoRef.current;
+            if (!v) return;
+            if (touchStart.current.half) {
+              const newVol = Math.max(0, Math.min(1, touchStart.current.vol + dy / -200));
+              v.volume = newVol;
+              v.muted = newVol === 0;
+              setVolume(newVol);
+              setMuted(newVol === 0);
+              showSwipeHint(`Vol ${Math.round(newVol * 100)}%`);
+            } else {
+              const newB = Math.max(0.3, Math.min(1.5, touchStart.current.bright + dy / -200));
+              setBrightness(newB);
+              showSwipeHint(`Cahaya ${Math.round(newB * 100)}%`);
+            }
+          }}
+          onTouchEnd={(e) => {
+            if (locked || !touchStart.current.t) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - touchStart.current.x;
+            const dy = t.clientY - touchStart.current.y;
+            const dt = Date.now() - touchStart.current.t;
+            touchStart.current.t = 0;
+            if (Math.abs(dx) > Math.abs(dy) + 8 && Math.abs(dx) > 50 && dt < 600) {
+              skip(dx > 0 ? 10 : -10);
+              fireRipple(dx > 0 ? "right" : "left");
+            }
+          }}
+        />
+        {ripples.map(r => (
+          <div key={r.id}
+            className={cx("pointer-events-none absolute top-1/2 z-20 -translate-y-1/2 animate-ping-once rounded-full", r.side === "left" ? "left-4" : "right-4")}>
+            <div className="flex h-20 w-20 flex-col items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
+              <span className="text-white">{r.dir === -1 ? <RewindIcon size={28} /> : <FastForwardIcon size={28} />}</span>
+              <span className="text-[10px] font-bold text-white">10s</span>
+            </div>
+          </div>
+        ))}
+        {swipeHint && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
+            <div className="rounded-full bg-black/70 px-4 py-2 text-sm font-bold text-white backdrop-blur">{swipeHint}</div>
+          </div>
+        )}
+        {buffering && playing && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+            <Spinner className="h-9 w-9 !border-white/30 !border-t-white" />
+          </div>
+        )}
+        {videoError && (
+          <div className="video-error-overlay">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <p className="font-semibold text-white">
+                {videoError === 'gdrive' ? 'GDrive limit tercapai' : 'Video gagal diputar'}
+              </p>
+              <p className="text-sm text-white/60">Coba resolusi lain atau refresh halaman</p>
+              <div className="flex gap-2">
+                <button onClick={() => {
+                  const qStack = Object.keys(safeQualities);
+                  const curIdx = qStack.indexOf(activeQuality);
+                  const nextKey = qStack[(curIdx + 1) % qStack.length];
+                  if (nextKey && nextKey !== activeQuality) {
+                    setQuality(nextKey);
+                    setVideoError(null);
+                    setTimeout(() => { const v = videoRef.current; if (v) { v.load(); v.play().catch(() => {}); } }, 50);
+                  }
+                }} className="rounded-lg bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20 transition">
+                  Coba Resolusi Lain
                 </button>
-              </div>
-              <textarea
-                value={reportText}
-                onChange={(e) => setReportText(e.target.value)}
-                placeholder="Ceritakan masalah yang kamu temui... (mis. video tidak diputar, subtitle salah, episode hilang)"
-                rows={4}
-                maxLength={500}
-                className="w-full bg-surface-highlight border border-border rounded-2xl px-4 py-3 text-text outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary text-[13.5px] font-medium resize-none"
-              />
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[11px] text-text-muted font-bold">{reportText.length}/500</span>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowReportModal(false)}
-                    className="px-4 py-2.5 rounded-2xl bg-surface-highlight hover:bg-border text-text font-bold text-[13px]"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const body = reportText.trim();
-                      if (!body) return;
-                      try {
-                        await fetch(`${API_BASE_URL}/report`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            userId: getCurrentUserId(),
-                            animeId: anime?.id || id,
-                            episode: currentEpisode?.number || null,
-                            source: activeSource,
-                            body,
-                          }),
-                        }).catch(() => {});
-                      } catch {}
-                      setShowReportModal(false);
-                      setReportText('');
-                      showToast('Laporan dikirim. Terima kasih!');
-                    }}
-                    disabled={!reportText.trim()}
-                    className="px-4 py-2.5 rounded-2xl bg-primary hover:bg-primary-dark text-white font-bold text-[13px] disabled:opacity-50"
-                  >
-                    Kirim Laporan
-                  </button>
-                </div>
+                <button onClick={() => { setVideoError(null); const v = videoRef.current; if (v) { v.load(); v.play().catch(() => {}); } }}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/80 transition">
+                  Coba Lagi
+                </button>
               </div>
             </div>
           </div>
         )}
-
-        {/* Unduh per-episode (di dalam player page). Pakai pemilih resolusi
-            yang sama dengan modal di detail view — bukan placeholder "batch
-            dimatikan" lagi. */}
-        {showDownloadModal && (
-          <div
-            data-testid="unduh-episode-modal-player"
-            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/65 backdrop-blur-md p-0 sm:p-4 animate-fade-in"
-            onClick={() => setShowDownloadModal(false)}
-          >
-            <div
-              className="bg-surface border-t sm:border border-border rounded-t-3xl sm:rounded-3xl px-6 pt-6 pb-8 max-w-md w-full shadow-2xl space-y-5 max-h-[85vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="sm:hidden mx-auto -mt-2 mb-3 w-10 h-1.5 rounded-full bg-text-muted/30" />
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-primary/15 text-primary flex items-center justify-center border border-primary/25">
-                  <Download size={22} />
-                </div>
-                <div className="space-y-0.5 flex-1 min-w-0">
-                  <h3 className="text-lg font-black text-text leading-tight">
-                    Unduh Episode {currentEpisode?.number || ''}
-                  </h3>
-                  <p className="text-[12px] text-text-secondary font-medium leading-relaxed">
-                    Pilih kualitas video. Unduhan jalan di latar belakang.
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-2.5">
-                {(() => {
-                  const groups = groupDownloadByResolution();
-                  if (!groups.length) {
-                    return (
-                      <div className="text-center text-[13px] text-text-secondary py-6 bg-surface-highlight rounded-2xl border border-border">
-                        {episodeDetails
-                          ? 'Tidak ada link download untuk episode ini.'
-                          : 'Memuat link download...'}
-                      </div>
-                    );
-                  }
-                  return groups.map((g, idx) => {
-                    const isMax = idx === 0;
-                    const is4K = g.resolution === '4K';
-                    const sourceName = g.hosts[0]?.host || 'Server';
-                    return (
-                      <div
-                        key={g.resolution}
-                        className={`w-full rounded-2xl border overflow-hidden transition-all ${
-                          isMax
-                            ? 'bg-gradient-to-br from-primary to-primary-dark border-primary-dark text-white shadow-lg shadow-primary/30'
-                            : 'bg-surface-highlight border-border text-text'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between px-4 pt-4 pb-2.5 gap-3">
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <span className={`flex items-center justify-center w-12 h-12 rounded-xl text-[12px] font-black shrink-0 ${
-                              isMax
-                                ? 'bg-white/25 text-white'
-                                : (is4K ? 'bg-purple-500/15 text-purple-700 dark:text-purple-300' : 'bg-surface text-text border border-border')
-                            }`}>
-                              {g.resolution}
-                            </span>
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-[14px] font-black leading-snug flex items-center gap-2 flex-wrap">
-                                {g.resolution}
-                                {is4K && <span className="text-[10px] uppercase tracking-wider opacity-80 font-bold">Ultra HD</span>}
-                                {isMax && <span className="text-[9px] uppercase tracking-[0.18em] font-black bg-white/25 px-1.5 py-0.5 rounded">Maks</span>}
-                              </span>
-                              <span className={`text-[11px] font-semibold mt-0.5 truncate ${isMax ? 'text-white/85' : 'text-text-muted'}`}>
-                                {sourceName} · {g.hosts.length} mirror
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          data-testid="download-quality-option-player"
-                          onClick={() => {
-                            const HOST_PRIORITY = ['kdrive', 'iino', 'komari', 'asuna', 'kitasan', 'chisato', 'huntersekai', 'mp4upload', 'krakenfiles', 'gofile', 'mirror', 'pdrain', 'pixeldrain'];
-                            const ranked = [...g.hosts].sort((a, b) => {
-                              const ra = HOST_PRIORITY.findIndex((h) => (a.host || '').toLowerCase().includes(h));
-                              const rb = HOST_PRIORITY.findIndex((h) => (b.host || '').toLowerCase().includes(h));
-                              return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
-                            });
-                            startBackgroundDownload(ranked.map((r) => r.url), g.resolution);
-                          }}
-                          className={`w-full flex items-center justify-center gap-2 px-4 py-3 text-[12px] font-black uppercase tracking-[0.18em] transition active:scale-[0.98] ${
-                            isMax
-                              ? 'bg-white/20 hover:bg-white/30 text-white'
-                              : 'bg-primary hover:bg-primary-dark text-white'
-                          }`}
-                        >
-                          <Download size={15} strokeWidth={2.5} />
-                          Download
-                        </button>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-              <button
-                onClick={() => setShowDownloadModal(false)}
-                className="w-full bg-surface-highlight hover:bg-border text-text font-bold py-3.5 rounded-2xl transition active:scale-95 text-sm"
-              >
-                Tutup
+        {ended && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/75 backdrop-blur-sm">
+            <p className="text-sm font-medium text-white/80">Episode selesai</p>
+            {hasNext && prefs.autoplayNext ? (
+              <>
+                <button onClick={() => { setCountdown(null); onNext?.(); }}
+                  className="flex items-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-bold text-white glow-accent">
+                  <PlayIcon size={18} className="ml-0.5" /> Episode Selanjutnya
+                </button>
+                {countdown !== null && (
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="relative flex h-12 w-12 items-center justify-center">
+                      <svg className="absolute inset-0 -rotate-90" viewBox="0 0 48 48">
+                        <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
+                        <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"
+                          strokeDasharray={2 * Math.PI * 20}
+                          strokeDashoffset={2 * Math.PI * 20 * (1 - countdown / 5)}
+                          className="text-accent transition-[stroke-dashoffset] duration-1000 ease-linear" />
+                      </svg>
+                      <span className="text-base font-bold text-white">{countdown}</span>
+                    </div>
+                    <p className="text-xs text-white/60">Otomatis lanjut...</p>
+                    <button onClick={() => setCountdown(null)}
+                      className="rounded-lg bg-white/10 px-4 py-1.5 text-xs font-semibold text-white hover:bg-white/20 transition">
+                      Batal
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-white/60">{hasNext ? "Putar episode selanjutnya" : "Ini episode terakhir"}</p>
+            )}
+          </div>
+        )}
+        {locked && (
+          <button onClick={toggleLock} aria-label="Buka kunci kontrol"
+            className="absolute left-3 top-1/2 z-30 flex -translate-y-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-2.5 text-white backdrop-blur transition active:scale-95">
+            <LockOpenIcon size={18} />
+          </button>
+        )}
+        <div className={cx("absolute inset-0 z-20 transition-opacity duration-200 pointer-events-none", controlsVisible ? "opacity-100" : "opacity-0")}>
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/70 via-transparent to-black/85" />
+          <div className="pointer-events-auto absolute inset-x-0 top-0 flex items-center gap-2 p-3">
+            <button onClick={togglePip} disabled={!pipSupported} aria-label="Picture in Picture"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition active:scale-95 disabled:opacity-30">
+              <PipIcon size={18} className={pip ? "text-accent2" : ""} />
+            </button>
+            <div className="mx-auto max-w-[62%] truncate rounded-full bg-black/50 px-3.5 py-1.5 text-center text-xs font-semibold text-white backdrop-blur">
+              EP {episodeNumber} - {title}
+            </div>
+            <button onClick={minimizeToMiniPlayer} aria-label="Minimize ke mini player"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition active:scale-95">
+              <MiniPlayerIcon size={18} />
+            </button>
+            <button onClick={() => setShowPlaylist(true)} aria-label="Daftar episode"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition active:scale-95">
+              <QueueIcon size={18} />
+            </button>
+          </div>
+          <button onClick={toggleLock} aria-label="Kunci kontrol"
+            className="pointer-events-auto absolute left-3 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1.5 rounded-full bg-black/50 px-3 py-2 text-white backdrop-blur transition active:scale-95">
+            <LockIcon size={16} />
+            <span className="hidden text-xs font-semibold sm:inline">Kunci</span>
+          </button>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="pointer-events-auto flex items-center gap-5 sm:gap-8">
+              <button onClick={() => skip(-10)} aria-label="Mundur 10 detik"
+                className="relative flex h-14 w-14 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition active:scale-90 sm:h-16 sm:w-16">
+                <RewindCurveIcon size={28} />
+                <span className="absolute inset-0 flex items-center justify-center pt-0.5 text-[11px] font-bold tabular-nums">10</span>
+              </button>
+              <button onClick={toggle} aria-label={playing ? "Jeda" : "Putar"}
+                className="flex h-[68px] w-[68px] items-center justify-center rounded-full bg-black/40 text-white backdrop-blur shadow-lg shadow-black/40 transition active:scale-90 sm:h-20 sm:w-20">
+                {playing ? <PauseIcon size={34} /> : <PlayIcon size={34} className="ml-1" />}
+              </button>
+              <button onClick={() => skip(10)} aria-label="Maju 10 detik"
+                className="relative flex h-14 w-14 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition active:scale-90 sm:h-16 sm:w-16">
+                <ForwardCurveIcon size={28} />
+                <span className="absolute inset-0 flex items-center justify-center pt-0.5 text-[11px] font-bold tabular-nums">10</span>
               </button>
             </div>
           </div>
-        )}
-
-        {/* Custom Toast Alert */}
-        <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] transition-all duration-300 pointer-events-none ${toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-          <div className="bg-white border border-[#e4e4e7] text-black px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-2 max-w-[90vw] text-center border-l-4 border-l-[#c68a4e]">
-            <p className="text-xs font-bold tracking-wide">{toastMessage}</p>
-          </div>
-        </div>
-
-        {/* Toast unduh latar belakang — pojok kiri bawah */}
-        <div
-          data-testid="download-started-toast"
-          className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] transition-all duration-300 pointer-events-none ${
-            downloadStartedToast ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
-          }`}
-        >
-          {downloadStartedToast && (
-            <div className="bg-[#18181b] text-white pl-4 pr-5 py-3 rounded-2xl shadow-2xl border border-[#27272a] flex items-center gap-3 max-w-[88vw]">
-              <span className="relative w-5 h-5 inline-flex shrink-0">
-                <span className="absolute inset-0 border-2 border-white/20 rounded-full" />
-                <span className="absolute inset-0 border-2 border-[#c68a4e] border-t-transparent rounded-full animate-spin" />
-              </span>
-              <div className="flex flex-col">
-                <span className="text-xs font-black tracking-wide leading-tight">Mulai mengunduh</span>
-                <span className="text-[10px] text-zinc-300 font-medium leading-tight truncate max-w-[60vw]">
-                  {downloadStartedToast.title} · EP {downloadStartedToast.episode} · {downloadStartedToast.resolution}
-                </span>
+          <div className="pointer-events-auto absolute inset-x-0 bottom-0 space-y-1.5 p-3">
+            <div className="flex items-center gap-1.5 text-xs font-medium tabular-nums text-white/90">
+              <span>{fmtTime(current)}</span>
+              <span className="text-white/40">/</span>
+              <span>{fmtTime(duration)}</span>
+              {rate !== 1 && <span className="ml-1 rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-bold text-accent2">{rate}x</span>}
+            </div>
+            <div data-testid="player-progress-bar" className="group/bar relative h-4 cursor-pointer"
+              onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHoverFrac((e.clientX - r.left) / r.width); }}
+              onMouseLeave={() => setHoverFrac(null)}
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seekFrac((e.clientX - r.left) / r.width); }}>
+              <div className="absolute top-1/2 h-1 w-full -translate-y-1/2 overflow-hidden rounded-full bg-white/25 transition-[height] duration-150 group-hover/bar:h-1.5">
+                <div className="absolute inset-y-0 left-0 rounded-full bg-white/30" style={{ width: `${bufPct}%` }} />
+                <div className="absolute inset-y-0 left-0 rounded-full bg-white" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow transition group-hover/bar:opacity-100" style={{ left: `${pct}%` }} />
+              {hoverTime != null && (
+                <div className="pointer-events-none absolute bottom-5 z-30 -translate-x-1/2 rounded-md bg-black/90 px-2 py-1 text-[11px] font-semibold tabular-nums text-white ring-1 ring-white/15" style={{ left: `${(hoverFrac ?? 0) * 100}%` }}>
+                  {fmtTime(hoverTime)}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between text-white">
+              <div className="flex items-center gap-0.5">
+                <IconBtn onClick={onPrev} data-testid="player-prev-episode" label="Episode sebelumnya" disabled={!hasPrev}><SkipBackEpIcon size={18} /></IconBtn>
+                <IconBtn onClick={toggle} label={playing ? "Jeda" : "Putar"}>{playing ? <PauseIcon size={18} /> : <PlayIcon size={18} className="ml-0.5" />}</IconBtn>
+                <IconBtn onClick={onNext} data-testid="player-next-episode" label="Episode selanjutnya" disabled={!hasNext}><SkipForwardEpIcon size={18} /></IconBtn>
+                <div className={cx("relative flex items-center", fullscreen ? "flex" : "hidden sm:flex")}>
+                  <button onClick={() => {
+                      if (videoRef.current) {
+                        const newMuted = !videoRef.current.muted;
+                        videoRef.current.muted = newMuted;
+                        setMuted(newMuted);
+                      }
+                    }}
+                    aria-label={muted ? "Aktifkan suara" : "Matikan suara"}
+                    className="flex h-9 w-9 items-center justify-center rounded-full text-white transition active:scale-90">
+                    {muted || volume === 0 ? <VolumeMuteIcon size={18} /> : <VolumeHighIcon size={18} />}
+                  </button>
+                  <input type="range" min={0} max={1} step={0.05} value={muted ? 0 : volume}
+                    onChange={(e) => { const v = parseFloat(e.target.value); setVolume(v); setMuted(v === 0); if (videoRef.current) { videoRef.current.volume = v; videoRef.current.muted = v === 0; } }}
+                    className="w-14 h-1 accent-accent cursor-pointer sm:w-16"
+                    style={{ accentColor: 'var(--accent)' }} />
+                </div>
+                <div className={cx("relative flex items-center", fullscreen ? "flex" : "hidden sm:flex")}>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full text-white transition">
+                    <SunIcon size={18} />
+                  </span>
+                  <input type="range" min={0.3} max={1.5} step={0.05} value={brightness}
+                    onChange={(e) => setBrightness(parseFloat(e.target.value))}
+                    className="w-14 h-1 accent-accent cursor-pointer sm:w-16"
+                    style={{ accentColor: 'var(--accent)' }} />
+                </div>
+                <IconBtn onClick={() => setLoopEp(l => !l)} label="Ulangi episode" className={cx(loopEp && "bg-accent text-white")}>
+                  <RepeatIcon size={18} />
+                </IconBtn>
+              </div>
+              <div className="flex items-center gap-0.5">
+                <IconBtn onClick={captureFrame} label="Tangkap frame" className="hidden sm:flex">
+                  <CameraIcon size={18} />
+                </IconBtn>
+                <div className="relative">
+                  <button onClick={() => setMenu(menu === "settings" ? "none" : "settings")} aria-label="Kualitas"
+                    className={cx("flex h-9 items-center justify-center rounded-full border border-white/40 px-2 text-xs font-bold transition active:scale-90", menu === "settings" ? "bg-white/20 text-accent2" : "text-white hover:bg-white/15")}>
+                    {localSrc ? "Offline" : (activeQuality || "HQ")}
+                  </button>
+                  {menu === "settings" && (
+                    <div className="absolute bottom-11 right-0 w-32 rounded-xl bg-black/95 p-2 ring-1 ring-white/15 backdrop-blur">
+                      <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-white/40">Kualitas</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        {keys.map(q => (
+                          <button key={q} onClick={() => { setStreamPick({ ep: episodeNumber, q }); changeQuality(q); setMenu("none"); }}
+                            className={cx("rounded px-1 py-1.5 text-xs font-semibold transition", activeQuality === q ? "bg-accent text-white" : "text-white/80 hover:bg-white/10")}>{q}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="relative">
+                  <button onClick={() => setMenu(menu === "speed" ? "none" : "speed")} aria-label="Kecepatan"
+                    className={cx("flex h-9 w-9 items-center justify-center rounded-full text-white transition active:scale-90", menu === "speed" ? "bg-white/20 text-accent2" : "hover:bg-white/15")}>
+                    <GaugeIcon size={18} />
+                  </button>
+                  {menu === "speed" && (
+                    <div className="absolute bottom-11 right-0 grid w-32 grid-cols-3 gap-1 rounded-xl bg-black/95 p-2 ring-1 ring-white/15 backdrop-blur">
+                      {RATES.map(r => (
+                        <button key={r} onClick={() => { setR(r); setMenu("none"); }}
+                          className={cx("rounded px-1 py-1.5 text-xs font-semibold transition", rate === r ? "bg-accent text-white" : "text-white/80 hover:bg-white/10")}>{r}x</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <IconBtn onClick={() => setAspect(a => a === "contain" ? "cover" : "contain")} label="Rasio tampilan" className={cx(aspect === "cover" && "text-accent2")}>
+                  <AspectIcon size={18} />
+                </IconBtn>
+                <IconBtn onClick={toggleFullscreen} data-testid="player-fullscreen-btn" label="Layar penuh">{fullscreen ? <MinimizeIcon size={18} /> : <MaximizeIcon size={18} />}</IconBtn>
+                <button onClick={() => setShowShortcuts(s => !s)} aria-label="Pintasan keyboard"
+                  className="hidden h-9 w-9 items-center justify-center rounded-full text-white/70 transition hover:bg-white/15 hover:text-white lg:flex">?</button>
               </div>
             </div>
-          )}
+          </div>
         </div>
+        {showPlaylist && (
+          <div className="absolute inset-0 z-40 flex flex-col justify-end bg-black/60 backdrop-blur-sm" onClick={() => setShowPlaylist(false)}>
+            <div className="slide-up max-h-[65%] overflow-y-auto rounded-t-2xl bg-surface p-4" onClick={e => e.stopPropagation()}>
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line" />
+              <h3 className="mb-3 text-sm font-bold text-white">Daftar Episode</h3>
+              {episodes.length ? (
+                <div className="grid grid-cols-5 gap-2 pb-2 sm:grid-cols-8">
+                  {episodes.map(n => (
+                    <button key={n} onClick={() => { onSelectEpisode?.(n); setShowPlaylist(false); }}
+                      className={cx("rounded-lg py-2.5 text-sm font-semibold transition", n === episodeNumber ? "bg-accent text-white" : "bg-elevated text-ink hover:bg-line")}>{n}</button>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-4 text-center text-sm text-muted">Daftar episode tidak tersedia.</p>
+              )}
+            </div>
+          </div>
+        )}
+        {showSkipIntro && !locked && (
+          <button onClick={() => skip(skipRange ? skipEnd : skipIntro)}
+            className="absolute bottom-24 right-3 z-30 flex items-center gap-1.5 rounded-xl bg-black/60 px-4 py-2 text-sm font-medium text-white/90 ring-1 ring-white/10 backdrop-blur transition active:scale-95">
+            Lewati Intro{skipLabel} <FastForwardIcon size={14} />
+          </button>
+        )}
+        {showSkipOutro && !locked && (
+          <button onClick={jumpToEnd}
+            className="absolute bottom-24 left-3 z-30 flex items-center gap-1.5 rounded-xl bg-black/60 px-4 py-2 text-sm font-medium text-white/90 ring-1 ring-white/10 backdrop-blur transition active:scale-95">
+            <FastForwardIcon size={14} /> Lewati Outro
+          </button>
+        )}
+        {showShortcuts && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={() => setShowShortcuts(false)}>
+            <div className="w-full max-w-sm rounded-2xl bg-surface p-5 ring-1 ring-line" onClick={e => e.stopPropagation()}>
+              <h3 className="mb-4 text-center text-base font-bold text-white">Pintasan Keyboard</h3>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                {SHORTCUTS.map(([k, d]) => (
+                  <div key={k} className="flex items-center justify-between gap-2">
+                    <span className="text-white/70">{d}</span>
+                    <kbd className="rounded bg-elevated px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-white/10">{k}</kbd>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setShowShortcuts(false)} className="mt-5 w-full rounded-lg bg-accent py-2 text-sm font-semibold text-white">Tutup</button>
+            </div>
+          </div>
+        )}
+        </div>
+      </div>
 
+      {/* Video Streaming Details Section */}
+      <div className="rounded-2xl border border-line bg-surface p-5 mt-4 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+          <div>
+            <h1 data-testid="video-detail-title" className="text-xl font-extrabold text-ink">{title || "Nonton Anime"} - Episode {episodeNumber}</h1>
+            <p className="text-xs text-muted mt-1">MahiStream NanimeID Player</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select data-testid="server-selector" className="rounded-xl border border-line bg-elevated px-3 py-2 text-xs font-bold text-ink outline-none">
+              <option value="server1">Server 1 (Fast HD)</option>
+              <option value="server2">Server 2 (VIP Backup)</option>
+              <option value="server3">Server 3 (Google Drive)</option>
+            </select>
+            <button data-testid="video-bookmark-btn" onClick={() => toast?.("Disimpan ke Bookmark Video", "success")} className="flex items-center gap-1.5 rounded-xl border border-line bg-elevated px-4 py-2 text-xs font-bold text-ink hover:border-accent">
+              <BookmarkIcon size={14} /> Bookmark Video
+            </button>
+            <button data-testid="video-like-btn" onClick={() => toast?.("Menyukai video", "success")} className="flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 text-xs font-bold text-white shadow hover:brightness-110">
+              <HeartIcon size={14} /> Suka
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

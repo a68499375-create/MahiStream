@@ -1,5 +1,5 @@
-import { Search } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { SearchIcon } from './icons';
+import { useNavigate, Link } from 'react-router-dom';
 import './TopBar.css';
 
 export default function TopBar() {
@@ -8,19 +8,18 @@ export default function TopBar() {
   return (
     <header className="top-bar" role="banner">
       <div className="top-bar-inner">
-        <a href="/" className="logo" aria-label="MahiStream home">
-          <span className="logo-mark" aria-hidden="true">M</span>
+        <Link to="/" className="logo" aria-label="MahiStream home" data-testid="header-logo">
           <span className="logo-text">
             <span className="logo-main">Mahi</span>
             <span className="logo-accent">Stream</span>
           </span>
-        </a>
+        </Link>
         <button
           className="search-btn"
           onClick={() => navigate('/search')}
           aria-label="Cari anime"
         >
-          <Search size={20} />
+          <SearchIcon size={20} />
         </button>
       </div>
     </header>

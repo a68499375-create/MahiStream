@@ -1,56 +1,39 @@
 // Password gate untuk fitur "Khusus" / Nekopoi.
-// Status terkunci/terbuka di-bind ke kombinasi PER-DEVICE + PER-AKUN:
-// kunci flag-nya menggunakan {device-token + user-id}. Akun A yang
-// unlock di device X tidak otomatis membuka akun B di device yang sama.
-// Akun A yang unlock di device X juga tidak ke-unlock di device Y.
+// Status terkunci/terbuka di-bind PER-AKUN:
+// Kalau user sudah login dan unlock, akses tetap terbuka di device manapun
+// selama login dengan akun yang sama. Guest/anonymous tetap per-device.
 import { obfuscate, deobfuscate, checkRateLimit, incrementRateLimit, resetRateLimit } from './security';
 
-const DEVICE_TOKEN_KEY = 'mahistream_device_token_v1';
-const KHUSUS_PASSWORD_OBFUSCATED = obfuscate('alfathsayangkagari');
+const KHUSUS_PASSWORD_OBFUSCATED = obfuscate('animebokep');
 const RATE_LIMIT_KEY = 'khusus_password';
 const LISTENERS = new Set();
 
-const getDeviceToken = () => {
-  try {
-    let tok = localStorage.getItem(DEVICE_TOKEN_KEY);
-    if (!tok) {
-      tok = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : 'tok-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
-      localStorage.setItem(DEVICE_TOKEN_KEY, tok);
-    }
-    return tok;
-  } catch {
-    return 'tok-fallback';
-  }
-};
-
-// User ID untuk binding khusus — pakai email Google kalau login,
-// fallback ke 'guest' supaya semua tamu di device yang sama berbagi flag.
+// Get logged-in user's account ID from AuthContext's localStorage key
 const getAccountId = () => {
   try {
-    const raw = localStorage.getItem('mahistream_user');
+    // AuthContext stores user data under 'mahi-user'
+    const raw = localStorage.getItem('mahi-user');
     const u = raw ? JSON.parse(raw) : null;
-    return (u && (u.email || u.name)) || 'guest';
-  } catch {
-    return 'guest';
-  }
+    if (u && u.id) return u.id;
+    if (u && (u.email || u.username)) return u.email || u.username;
+  } catch {}
+  return null; // not logged in
 };
 
-const storageKeyForAccount = () =>
-  `mahistream_khusus_unlocked_${getAccountId()}_v2`;
+// Storage key — per-account for logged-in users, per-device for guests
+const storageKeyForAccount = () => {
+  const accountId = getAccountId();
+  if (accountId) {
+    return `mahistream_khusus_account_${accountId}`;
+  }
+  // Fallback for guests: per-device
+  return 'mahistream_khusus_guest';
+};
 
 export const isKhususUnlocked = () => {
   try {
     const raw = localStorage.getItem(storageKeyForAccount());
-    if (!raw) return false;
-    const expectedToken = getDeviceToken();
-    const [tok, status] = raw.split(':');
-    if (tok !== expectedToken || status !== 'true') {
-      try { localStorage.removeItem(storageKeyForAccount()); } catch {}
-      return false;
-    }
-    return true;
+    return raw === 'unlocked';
   } catch {
     return false;
   }
@@ -72,8 +55,7 @@ export const unlockKhusus = (password) => {
     return { ok: false, throttled: false };
   }
   try {
-    const tok = getDeviceToken();
-    localStorage.setItem(storageKeyForAccount(), `${tok}:true`);
+    localStorage.setItem(storageKeyForAccount(), 'unlocked');
   } catch {}
   resetRateLimit(RATE_LIMIT_KEY);
   LISTENERS.forEach((cb) => { try { cb(true); } catch (_e) {} });

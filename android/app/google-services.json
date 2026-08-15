@@ -7,6 +7,35 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:632438660940:android:6d53594a22469998f939e9",
+        "android_client_info": {
+          "package_name": "com.mahistream.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "632438660940-jn6rbaa8dulcq6o5sol7p236toffha43.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAwA07n-FdcQqtFEfXcuWyvs7A6s8CNlw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "632438660940-jn6rbaa8dulcq6o5sol7p236toffha43.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:632438660940:android:c6662fe86bda3d89f939e9",
         "android_client_info": {
           "package_name": "com.mahistream.hd"

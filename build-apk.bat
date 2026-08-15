@@ -13,7 +13,7 @@ cd /d "%PROJECT_DIR%"
 
 echo.
 echo [1/4] Installing npm dependencies...
-npm install --legacy-peer-deps
+call npm install --legacy-peer-deps
 if errorlevel 1 (
     echo ERROR: npm install failed
     exit /b 1
@@ -21,7 +21,7 @@ if errorlevel 1 (
 
 echo.
 echo [2/4] Building Vite app...
-npm run build
+call npm run build
 if errorlevel 1 (
     echo ERROR: Vite build failed
     exit /b 1
@@ -29,7 +29,7 @@ if errorlevel 1 (
 
 echo.
 echo [3/4] Syncing Capacitor Android...
-npx cap sync android
+call npx cap sync android
 if errorlevel 1 (
     echo ERROR: Capacitor sync failed
     exit /b 1
@@ -52,7 +52,7 @@ echo ==========================================
 echo.
 echo Copying APK to Downloads folder...
 set APK_SOURCE=%PROJECT_DIR%\android\app\build\outputs\apk\release\app-release.apk
-set APK_DEST=%DOWNLOADS_DIR%\MahiStream-v1.4.0-release.apk
+set APK_DEST=%DOWNLOADS_DIR%\MahiStream.apk
 
 if exist "%APK_SOURCE%" (
     copy /y "%APK_SOURCE%" "%APK_DEST%"

@@ -8,6 +8,15 @@ export default defineConfig({
     react(),
     tailwindcss()
   ],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
   build: {
     // Minifikasi lebih agresif untuk bundle lebih kecil → load lebih cepat
     minify: 'terser',
@@ -21,6 +30,9 @@ export default defineConfig({
         drop_debugger: true,
         passes: 2,
       },
+      // Matikan mangling untuk mencegah TDZ (Cannot access 'X' before initialization)
+      // akibat rename collision antar module scope ketika destructuring context hook
+      mangle: false,
     },
     // Split chunks supaya vendor libraries di-cache terpisah oleh browser
     // Vite 8 (Rolldown) butuh manualChunks sebagai function
@@ -29,12 +41,6 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router-dom')) {
             return 'react-vendor';
-          }
-          if (id.includes('node_modules/hls.js')) {
-            return 'player';
-          }
-          if (id.includes('node_modules/lucide-react')) {
-            return 'icons';
           }
         },
       },

@@ -4,3 +4,10 @@ dist
 *.local
 .DS_Store
 *.log
+*.zip
+*.tar
+*.tar.gz
+*.b64
+*.jks
+chunks_count.txt
+graphify-out
