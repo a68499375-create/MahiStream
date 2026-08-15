@@ -68,7 +68,7 @@ export default function AnimeDetailPage() {
             anime: k,
             eps: [...(k.gdrive_links || [])].sort((a, b) => (Number(a?.episode) || 0) - (Number(b?.episode) || 0)).map((l, i) => {
               const n = l && l.episode != null ? Number(l.episode) : i + 1;
-              return { id: n, anime_id: k.id, number: n, title: `Episode ${n}`, gdrive_links: [l], duration: 0 };
+              return { id: n, anime_id: k.id, number: n, title: l?.title || `Episode ${n}`, gdrive_links: [l], duration: 0 };
             }),
             khusus: true
           };
