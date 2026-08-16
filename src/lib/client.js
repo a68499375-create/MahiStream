@@ -55,11 +55,23 @@ function authHeader() {
   return {};
 }
 
+// Route /khusus di-gate server dengan token HMAC hasil unlock. Token
+// disimpan oleh utils/khususAuth.js; dikirim otomatis utk path khusus.
+function khususHeader(path) {
+  if (typeof path === "string" && path.startsWith("/khusus")) {
+    try {
+      const tok = localStorage.getItem("mahistream_khusus_token_v1");
+      if (tok) return { "x-khusus-token": tok };
+    } catch {}
+  }
+  return {};
+}
+
 export async function api(path, opts, body, extraHeaders) {
   let url = API + path;
 
   if (typeof opts === "string") {
-    const headers = { "Content-Type": "application/json", ...authHeader(), ...(extraHeaders || {}) };
+    const headers = { "Content-Type": "application/json", ...authHeader(), ...khususHeader(path), ...(extraHeaders || {}) };
     const fetchOpts = { method: opts, headers, signal: AbortSignal.timeout(30000) };
     if (body) fetchOpts.body = JSON.stringify(body);
     const res = await fetch(url, fetchOpts);
@@ -90,7 +102,7 @@ export async function api(path, opts, body, extraHeaders) {
     url += toQuery(opts.params);
     delete opts.params;
   }
-  const headers = { "Content-Type": "application/json", ...authHeader(), ...(opts?.headers || {}) };
+  const headers = { "Content-Type": "application/json", ...authHeader(), ...khususHeader(path), ...(opts?.headers || {}) };
   const res = await fetch(url, { ...opts, headers, signal: AbortSignal.timeout(30000) });
   const text = await res.text();
   let data = null;

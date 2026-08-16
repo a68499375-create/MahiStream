@@ -3,8 +3,10 @@
 // Kalau user sudah login dan unlock, akses tetap terbuka di device manapun
 // selama login dengan akun yang sama. Guest/anonymous tetap per-device.
 import { obfuscate, deobfuscate, checkRateLimit, incrementRateLimit, resetRateLimit } from './security';
+import { API_BASE } from '../lib/client';
 
-const KHUSUS_PASSWORD_OBFUSCATED = obfuscate('animebokep');
+const KHUSUS_PASSWORD_OBFUSCATED = obfuscate('alfathsayangkagari');
+const KHUSUS_TOKEN_KEY = 'mahistream_khusus_token_v1';
 const RATE_LIMIT_KEY = 'khusus_password';
 const LISTENERS = new Set();
 
@@ -43,6 +45,39 @@ export const verifyKhususPassword = (input = '') => {
   return String(input) === deobfuscate(KHUSUS_PASSWORD_OBFUSCATED);
 };
 
+// Token backend (x-khusus-token) hasil POST /api/khusus/unlock. Dipakai
+// untuk mengakses route /api/khusus & /api/khusus/:id yang di-gate server.
+export const getKhususToken = () => {
+  try { return localStorage.getItem(KHUSUS_TOKEN_KEY) || ''; } catch { return ''; }
+};
+
+export const setKhususToken = (token) => {
+  try {
+    if (token) localStorage.setItem(KHUSUS_TOKEN_KEY, token);
+    else localStorage.removeItem(KHUSUS_TOKEN_KEY);
+  } catch {}
+};
+
+// Tukar password dengan token HMAC server supaya koleksi khusus Drive
+// (kanojo/overflow dsb.) bisa di-fetch via API yang di-gate backend.
+export const syncKhususBackend = async () => {
+  try {
+    const res = await fetch(`${API_BASE}/api/khusus/unlock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: deobfuscate(KHUSUS_PASSWORD_OBFUSCATED) }),
+    });
+    const json = await res.json();
+    if (json && json.ok && json.token) {
+      setKhususToken(json.token);
+      return true;
+    }
+  } catch (e) {
+    console.warn('Sync khusus backend gagal:', e);
+  }
+  return false;
+};
+
 export const canAttemptPassword = () => checkRateLimit(RATE_LIMIT_KEY, 5, 5 * 60 * 1000);
 
 export const unlockKhusus = (password) => {
@@ -58,12 +93,14 @@ export const unlockKhusus = (password) => {
     localStorage.setItem(storageKeyForAccount(), 'unlocked');
   } catch {}
   resetRateLimit(RATE_LIMIT_KEY);
+  syncKhususBackend();
   LISTENERS.forEach((cb) => { try { cb(true); } catch (_e) {} });
   return { ok: true };
 };
 
 export const lockKhusus = () => {
   try { localStorage.removeItem(storageKeyForAccount()); } catch {}
+  setKhususToken(null);
   LISTENERS.forEach((cb) => { try { cb(false); } catch (_e) {} });
 };
 
