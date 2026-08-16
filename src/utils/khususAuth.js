@@ -5,7 +5,7 @@
 import { obfuscate, deobfuscate, checkRateLimit, incrementRateLimit, resetRateLimit } from './security';
 import { API_BASE } from '../lib/client';
 
-const KHUSUS_PASSWORD_OBFUSCATED = obfuscate('alfathsayangkagari');
+const KHUSUS_PASSWORD_OBFUSCATED = obfuscate('animebokep');
 const KHUSUS_TOKEN_KEY = 'mahistream_khusus_token_v1';
 const RATE_LIMIT_KEY = 'khusus_password';
 const LISTENERS = new Set();
